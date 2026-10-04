@@ -631,7 +631,7 @@ applyTheme();
 // ══════════════════════════════════════════════════════
 // SUPABASE
 // ══════════════════════════════════════════════════════
-async function sbReq(path, opts = {}) {
+async function sbReq(path, opts = {}, _retry = false) {
   const r = await fetch(`${C.SB_URL}${path}`, {
     ...opts,
     headers: {
@@ -642,7 +642,33 @@ async function sbReq(path, opts = {}) {
       ...opts.headers
     }
   });
-  if (!r.ok) { const e = await r.text(); console.warn('SB err', path, e); return null; }
+
+  // JWT expirado — tenta refresh uma vez
+  if ((r.status === 401 || r.status === 403) && !_retry && S.user?.refreshToken) {
+    const renewed = await sbRefreshToken(S.user.refreshToken);
+    if (renewed.access_token) {
+      S.user.sbToken = renewed.access_token;
+      S.user.refreshToken = renewed.refresh_token || S.user.refreshToken;
+      localStorage.setItem('dora-session', JSON.stringify(S.user));
+      return sbReq(path, opts, true); // uma tentativa extra com o novo token
+    }
+    // Refresh falhou — sessão morta, forçar login
+    localStorage.removeItem('dora-session');
+    S.user = null;
+    document.getElementById('app-screen').style.display = 'none';
+    document.getElementById('auth-screen').style.display = 'flex';
+    toast('Sessão expirada. Faça login novamente.', 'r');
+    return null;
+  }
+
+  if (!r.ok) {
+    let errMsg = `Erro ${r.status}`;
+    try { const e = await r.json(); errMsg = e?.message || e?.error_description || errMsg; } catch {}
+    console.warn('SB err', r.status, path, errMsg);
+    throw new Error(errMsg); // propaga para o caller checar
+  }
+
+  if (r.status === 204) return true; // DELETE bem-sucedido não tem body
   try { return await r.json(); } catch { return []; }
 }
 
@@ -670,28 +696,46 @@ async function sbSignOut() {
     headers: { 'apikey': C.SB_KEY, 'Authorization': `Bearer ${S.user.sbToken}` }
   });
 }
+async function sbRefreshToken(refreshToken) {
+  const r = await fetch(`${C.SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { 'apikey': C.SB_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken })
+  });
+  return r.json();
+}
 
-// CRUD helpers
+// CRUD helpers — todos retornam null em erro (sbReq lança, aqui a gente pesca)
 async function sbGet(table, qs = '') {
   const uid = S.user?.id ? `&user_id=eq.${S.user.id}` : '';
-  const res = await sbReq(`/rest/v1/${table}?${qs}${uid}`);
-  return Array.isArray(res) ? res : [];
+  try {
+    const res = await sbReq(`/rest/v1/${table}?${qs}${uid}`);
+    return Array.isArray(res) ? res : [];
+  } catch { return []; }
 }
 async function sbInsert(table, data) {
-  return sbReq(`/rest/v1/${table}`, { method: 'POST', body: JSON.stringify({ ...data, user_id: S.user?.id }) });
+  try {
+    return await sbReq(`/rest/v1/${table}`, { method: 'POST', body: JSON.stringify({ ...data, user_id: S.user?.id }) });
+  } catch (e) { throw e; } // deixa o caller mostrar o toast de erro
 }
 async function sbUpdate(table, id, data) {
-  return sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  try {
+    return await sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  } catch (e) { throw e; }
 }
 async function sbDelete(table, id) {
-  return sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE' });
+  try {
+    return await sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE' });
+  } catch (e) { throw e; }
 }
 async function sbUpsert(table, data) {
-  return sbReq(`/rest/v1/${table}`, {
-    method: 'POST',
-    headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({ ...data, user_id: S.user?.id })
-  });
+  try {
+    return await sbReq(`/rest/v1/${table}`, {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({ ...data, user_id: S.user?.id })
+    });
+  } catch { return null; } // upsert no sync: falha silenciosa aceitável
 }
 
 // ══════════════════════════════════════════════════════
@@ -733,7 +777,7 @@ async function doLogin() {
   const res = await sbSignIn(email, pass);
   if (res.error) return showAuthError(res.error.message || 'E-mail ou senha incorretos.');
   const name = res.user?.user_metadata?.name || email.split('@')[0];
-  S.user = { id: res.user.id, email: res.user.email, name, sbToken: res.access_token };
+  S.user = { id: res.user.id, email: res.user.email, name, sbToken: res.access_token, refreshToken: res.refresh_token };
   localStorage.setItem('dora-session', JSON.stringify(S.user));
   launchApp();
 }
@@ -746,10 +790,41 @@ async function doLogout() {
   document.getElementById('auth-screen').style.display = 'flex';
 }
 
-function tryResumeSession() {
+async function tryResumeSession() {
   const saved = localStorage.getItem('dora-session');
   if (!saved) return false;
-  try { S.user = JSON.parse(saved); return true; } catch { return false; }
+  try {
+    S.user = JSON.parse(saved);
+    if (!S.user.refreshToken) { localStorage.removeItem('dora-session'); return false; }
+
+    // Renova o access token usando o refresh token
+    const res = await sbRefreshToken(S.user.refreshToken);
+
+    if (res.access_token) {
+      S.user.sbToken      = res.access_token;
+      S.user.refreshToken = res.refresh_token || S.user.refreshToken;
+      localStorage.setItem('dora-session', JSON.stringify(S.user));
+      return true;
+    }
+
+    // Refresh expirado (>7 dias sem abrir o app) — limpa e avisa
+    localStorage.removeItem('dora-session');
+    S.user = null;
+    // Mostra aviso na tela de login assim que ela aparecer
+    setTimeout(() => {
+      const el = document.getElementById('auth-success');
+      if (el) {
+        el.textContent = 'Sua sessão expirou. Por favor, entre novamente.';
+        el.style.display = 'block';
+        el.style.background = 'var(--yellow-bg)';
+        el.style.color = 'var(--yellow)';
+      }
+    }, 200);
+    return false;
+  } catch {
+    localStorage.removeItem('dora-session');
+    return false;
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -824,17 +899,22 @@ async function pGet(path) {
 async function syncPluggy() {
   const btn = document.getElementById('sync-btn');
   btn.textContent = '⏳ Sincronizando...'; btn.style.pointerEvents = 'none';
-  // Buscar conexões do usuário no Supabase
-  const conns = await sbReq('/rest/v1/pluggy_connections?select=item_id,bank_name') || [];
+
+  let conns = [];
+  try { conns = await sbReq('/rest/v1/pluggy_connections?select=item_id,bank_name') || []; }
+  catch { conns = []; }
+
   const items = conns.map(c => c.item_id);
   if (!items.length) {
     btn.textContent = '🔄 Sincronizar'; btn.style.pointerEvents = 'auto';
     toast('Nenhuma conta conectada. Vá em Contas para adicionar.', 'y'); return;
   }
-  let allAccs = [], allTxns = [];
+
+  let allAccs = [], errors = [];
   for (const itemId of items) {
+    const bankName = conns.find(c=>c.item_id===itemId)?.bank_name || itemId;
     const accData = await pGet(`/accounts?itemId=${itemId}`);
-    if (!accData?.results) continue;
+    if (!accData?.results) { errors.push(bankName); continue; }
     allAccs = [...allAccs, ...accData.results];
     for (const acc of accData.results) {
       const accType = acc.type || 'BANK';
@@ -874,9 +954,18 @@ async function syncPluggy() {
   S.accounts = allAccs;
   await loadData();
   renderPage(curPage());
-  btn.textContent = '✓ Sincronizado'; btn.style.pointerEvents = 'auto';
-  setTimeout(() => { btn.textContent = '🔄 Sincronizar'; }, 3000);
-  toast('Contas sincronizadas com sucesso!');
+  btn.style.pointerEvents = 'auto';
+  if (errors.length && allAccs.length === 0) {
+    btn.textContent = '⚠ Erro na sync';
+    toast(`Não foi possível conectar: ${errors.join(', ')}. Verifique o Item ID.`, 'r');
+  } else if (errors.length) {
+    btn.textContent = '⚠ Parcial';
+    toast(`Sincronizado parcialmente. Erro em: ${errors.join(', ')}.`, 'y');
+  } else {
+    btn.textContent = '✓ Sincronizado';
+    toast('Contas sincronizadas com sucesso!');
+  }
+  setTimeout(() => { btn.textContent = '🔄 Sincronizar'; }, 4000);
 }
 
 function autoCategory(desc) {
@@ -1269,18 +1358,27 @@ function renderGoals() {
 async function saveBill() {
   const name=v('b-name'), val=parseFloat(v('b-val')), day=parseInt(v('b-day')), cat=v('b-cat');
   if (!name||!val||!day) return toast('Preencha todos os campos','r');
-  await sbInsert('bills',{name,value:val,day,category:cat});
-  closeModal('modal-bill'); await loadData(); renderOverview();
+  try {
+    await sbInsert('bills',{name,value:val,day,category:cat});
+    closeModal('modal-bill');
+    document.getElementById('b-name').value=''; document.getElementById('b-val').value=''; document.getElementById('b-day').value='';
+    await loadData(); renderOverview(); toast('Vencimento adicionado!');
+  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
 }
 async function saveCategory() {
   const name=v('c-name'), icon=v('c-icon'), lim=parseFloat(v('c-lim'))||0;
   if (!name) return toast('Informe o nome da categoria','r');
-  await sbInsert('categories',{name,icon,limit:lim});
-  closeModal('modal-category'); await loadData(); renderBudget();
+  try {
+    await sbInsert('categories',{name,icon,limit:lim});
+    closeModal('modal-category');
+    document.getElementById('c-name').value=''; document.getElementById('c-icon').value=''; document.getElementById('c-lim').value='';
+    await loadData(); renderBudget(); toast('Categoria criada!');
+  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
 }
 async function deleteCategory(id) {
   if (!confirm('Remover categoria?')) return;
-  await sbDelete('categories',id); await loadData(); renderBudget();
+  try { await sbDelete('categories',id); await loadData(); renderBudget(); toast('Categoria removida.'); }
+  catch(e) { toast(`Erro: ${e.message}`,'r'); }
 }
 function setBudgetTotal() {
   const v2 = parseFloat(document.getElementById('bt-inp')?.value);
@@ -1289,41 +1387,56 @@ function setBudgetTotal() {
 async function saveAsset() {
   const type=v('a-type'), name=v('a-name'), val=parseFloat(v('a-val'))||0, emerg=v('a-emerg')==='yes';
   if (!name||!val) return toast('Preencha nome e valor','r');
-  if (emerg) for (const a of S.assets.filter(x=>x.is_emergency)) await sbUpdate('assets',a.id,{is_emergency:false});
-  await sbInsert('assets',{name,value:val,type,is_emergency:emerg});
-  closeModal('modal-asset'); await loadData(); renderInvestments();
+  try {
+    if (emerg) for (const a of S.assets.filter(x=>x.is_emergency)) await sbUpdate('assets',a.id,{is_emergency:false});
+    await sbInsert('assets',{name,value:val,type,is_emergency:emerg});
+    closeModal('modal-asset');
+    await loadData(); renderInvestments(); toast('Ativo salvo!');
+  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
 }
 async function deleteAsset(id) {
   if (!confirm('Remover ativo?')) return;
-  await sbDelete('assets',id); await loadData(); renderInvestments();
+  try { await sbDelete('assets',id); await loadData(); renderInvestments(); toast('Ativo removido.'); }
+  catch(e) { toast(`Erro: ${e.message}`,'r'); }
 }
 async function saveDebt() {
   const name=v('d-name'), type=v('d-type'), total=parseFloat(v('d-total'))||0, monthly=parseFloat(v('d-monthly'))||0,
     paid=parseInt(v('d-paid'))||0, totalInst=parseInt(v('d-total-inst'))||null, rate=parseFloat(v('d-rate'))||null;
   if (!name||!total) return toast('Preencha nome e valor total','r');
-  await sbInsert('debts',{name,type,total_amount:total,monthly_payment:monthly,paid_installments:paid,total_installments:totalInst,interest_rate:rate});
-  closeModal('modal-debt'); await loadData(); renderDebts();
+  try {
+    await sbInsert('debts',{name,type,total_amount:total,monthly_payment:monthly,paid_installments:paid,total_installments:totalInst,interest_rate:rate});
+    closeModal('modal-debt');
+    await loadData(); renderDebts(); toast('Dívida adicionada.');
+  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
 }
 async function deleteDebt(id) {
   if (!confirm('Remover dívida?')) return;
-  await sbDelete('debts',id); await loadData(); renderDebts();
+  try { await sbDelete('debts',id); await loadData(); renderDebts(); toast('Dívida removida.'); }
+  catch(e) { toast(`Erro: ${e.message}`,'r'); }
 }
 async function saveGoal() {
   const name=v('g-name'), icon=v('g-icon'), target=parseFloat(v('g-target')), saved=parseFloat(v('g-saved'))||0, date=v('g-date');
   if (!name||!target||!date) return toast('Preencha todos os campos','r');
-  await sbInsert('goals',{name,icon,target_value:target,saved,target_date:date});
-  closeModal('modal-goal'); await loadData(); renderGoals();
+  try {
+    await sbInsert('goals',{name,icon,target_value:target,saved,target_date:date});
+    closeModal('modal-goal');
+    document.getElementById('g-name').value=''; document.getElementById('g-icon').value=''; document.getElementById('g-target').value=''; document.getElementById('g-saved').value=''; document.getElementById('g-date').value='';
+    await loadData(); renderGoals(); toast('Meta criada! 🎯');
+  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
 }
 async function deleteGoal(id) {
   if (!confirm('Remover meta?')) return;
-  await sbDelete('goals',id); await loadData(); renderGoals();
+  try { await sbDelete('goals',id); await loadData(); renderGoals(); toast('Meta removida.'); }
+  catch(e) { toast(`Erro: ${e.message}`,'r'); }
 }
 async function addToGoal(id) {
   const amt = parseFloat(prompt('Quanto você alocou para esta meta? (R$)')||'0');
   if (!amt) return;
   const g = S.goals.find(x=>x.id===id); if (!g) return;
-  await sbUpdate('goals',id,{saved:(g.saved||0)+amt});
-  await loadData(); renderGoals();
+  try {
+    await sbUpdate('goals',id,{saved:(g.saved||0)+amt});
+    await loadData(); renderGoals(); toast(`${fmt(amt)} aportados na meta!`);
+  } catch(e) { toast(`Erro: ${e.message}`,'r'); }
 }
 function onAssetType() {
   document.getElementById('fipe-block').style.display = v('a-type')==='car' ? 'block' : 'none';
@@ -1443,7 +1556,7 @@ function toast(msg, type='g') {
 // ══════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════
-if (tryResumeSession()) launchApp();
+tryResumeSession().then(ok => { if (ok) launchApp(); });
 </script>
 
 <!-- Modal: Conectar banco -->
@@ -1517,16 +1630,26 @@ async function saveConnection() {
   const name = v('conn-name').trim();
   const itemId = v('conn-item-id').trim();
   if (!name || !itemId) return toast('Preencha nome e Item ID', 'r');
-  const res = await sbReq('/rest/v1/pluggy_connections', {
-    method: 'POST',
-    body: JSON.stringify({ bank_name: name, item_id: itemId, user_id: S.user.id })
-  });
-  if (!res) return toast('Erro ao salvar conexão', 'r');
-  closeModal('modal-connect');
-  document.getElementById('conn-name').value = '';
-  document.getElementById('conn-item-id').value = '';
-  await renderAccounts();
-  toast('Banco conectado! Sincronize para importar os dados.');
+  // Valida UUID básico
+  if (!/^[0-9a-f-]{36}$/i.test(itemId)) return toast('Item ID inválido — verifique o formato', 'r');
+  try {
+    await sbReq('/rest/v1/pluggy_connections', {
+      method: 'POST',
+      body: JSON.stringify({ bank_name: name, item_id: itemId, user_id: S.user.id })
+    });
+    closeModal('modal-connect');
+    document.getElementById('conn-name').value = '';
+    document.getElementById('conn-item-id').value = '';
+    await renderAccounts();
+    toast('Banco conectado! Clique em Sincronizar para importar os dados.');
+  } catch(e) {
+    // Duplicata é o erro mais comum — UUID já existe para este usuário
+    if (e.message?.includes('duplicate') || e.message?.includes('unique')) {
+      toast('Este Item ID já está conectado.', 'y');
+    } else {
+      toast(`Erro ao conectar: ${e.message}`, 'r');
+    }
+  }
 }
 
 async function deleteConnection(id) {
