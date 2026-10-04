@@ -631,7 +631,11 @@ applyTheme();
 // ══════════════════════════════════════════════════════
 // SUPABASE
 // ══════════════════════════════════════════════════════
-async function sbReq(path, opts = {}, _retry = false) {
+async function sbReq(path, opts = {}) {
+  // Renova o token proativamente se estiver perto de expirar (ou já expirado)
+  // ensureToken lança se o refresh definitivamente falhar → o caller captura
+  await ensureToken();
+
   const r = await fetch(`${C.SB_URL}${path}`, {
     ...opts,
     headers: {
@@ -643,32 +647,17 @@ async function sbReq(path, opts = {}, _retry = false) {
     }
   });
 
-  // JWT expirado — tenta refresh uma vez
-  if ((r.status === 401 || r.status === 403) && !_retry && S.user?.refreshToken) {
-    const renewed = await sbRefreshToken(S.user.refreshToken);
-    if (renewed.access_token) {
-      S.user.sbToken = renewed.access_token;
-      S.user.refreshToken = renewed.refresh_token || S.user.refreshToken;
-      localStorage.setItem('dora-session', JSON.stringify(S.user));
-      return sbReq(path, opts, true); // uma tentativa extra com o novo token
-    }
-    // Refresh falhou — sessão morta, forçar login
-    localStorage.removeItem('dora-session');
-    S.user = null;
-    document.getElementById('app-screen').style.display = 'none';
-    document.getElementById('auth-screen').style.display = 'flex';
-    toast('Sessão expirada. Faça login novamente.', 'r');
-    return null;
-  }
-
   if (!r.ok) {
     let errMsg = `Erro ${r.status}`;
-    try { const e = await r.json(); errMsg = e?.message || e?.error_description || errMsg; } catch {}
+    try {
+      const e = await r.json();
+      errMsg = e?.message || e?.error_description || errMsg;
+    } catch {}
     console.warn('SB err', r.status, path, errMsg);
-    throw new Error(errMsg); // propaga para o caller checar
+    throw new Error(errMsg);
   }
 
-  if (r.status === 204) return true; // DELETE bem-sucedido não tem body
+  if (r.status === 204) return true;
   try { return await r.json(); } catch { return []; }
 }
 
@@ -703,6 +692,49 @@ async function sbRefreshToken(refreshToken) {
     body: JSON.stringify({ refresh_token: refreshToken })
   });
   return r.json();
+}
+
+// Garante que o access_token é válido ANTES de qualquer chamada.
+// Decodifica o JWT localmente (sem chamada de rede) e renova se expirar em < 60s.
+let _refreshPromise = null;
+async function ensureToken() {
+  if (!S.user?.sbToken) return;
+
+  // Decodifica o payload do JWT (base64url) sem biblioteca
+  try {
+    const payload = JSON.parse(atob(S.user.sbToken.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    const expiresInSec = payload.exp - Math.floor(Date.now() / 1000);
+    if (expiresInSec > 60) return; // ainda válido por mais de 1 min — ok
+  } catch { /* token malformado — tenta renovar mesmo assim */ }
+
+  // Evita chamadas paralelas de refresh (ex: vários sbReq simultâneos)
+  if (!_refreshPromise) {
+    _refreshPromise = sbRefreshToken(S.user.refreshToken).finally(() => { _refreshPromise = null; });
+  }
+  const renewed = await _refreshPromise;
+
+  if (renewed?.access_token) {
+    S.user.sbToken      = renewed.access_token;
+    S.user.refreshToken = renewed.refresh_token || S.user.refreshToken;
+    localStorage.setItem('dora-session', JSON.stringify(S.user));
+  } else {
+    // Refresh falhou definitivamente — desloga
+    localStorage.removeItem('dora-session');
+    S.user = null;
+    document.getElementById('app-screen').style.display = 'none';
+    document.getElementById('auth-screen').style.display = 'flex';
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+}
+
+// Trata erros de forma uniforme: sessão expirada recebe mensagem especial
+function handleErr(e, fallbackMsg) {
+  const msg = e?.message || '';
+  if (msg.includes('expirada') || msg.includes('expired') || msg.includes('JWT')) {
+    toast('Sessão expirada. Faça login novamente.', 'r');
+  } else {
+    toast(fallbackMsg ? `${fallbackMsg}: ${msg}` : msg || 'Erro desconhecido', 'r');
+  }
 }
 
 // CRUD helpers — todos retornam null em erro (sbReq lança, aqui a gente pesca)
@@ -1363,7 +1395,7 @@ async function saveBill() {
     closeModal('modal-bill');
     document.getElementById('b-name').value=''; document.getElementById('b-val').value=''; document.getElementById('b-day').value='';
     await loadData(); renderOverview(); toast('Vencimento adicionado!');
-  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao salvar vencimento'); }
 }
 async function saveCategory() {
   const name=v('c-name'), icon=v('c-icon'), lim=parseFloat(v('c-lim'))||0;
@@ -1373,12 +1405,12 @@ async function saveCategory() {
     closeModal('modal-category');
     document.getElementById('c-name').value=''; document.getElementById('c-icon').value=''; document.getElementById('c-lim').value='';
     await loadData(); renderBudget(); toast('Categoria criada!');
-  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao salvar categoria'); }
 }
 async function deleteCategory(id) {
   if (!confirm('Remover categoria?')) return;
   try { await sbDelete('categories',id); await loadData(); renderBudget(); toast('Categoria removida.'); }
-  catch(e) { toast(`Erro: ${e.message}`,'r'); }
+  catch(e) { handleErr(e, 'Erro ao remover'); }
 }
 function setBudgetTotal() {
   const v2 = parseFloat(document.getElementById('bt-inp')?.value);
@@ -1392,12 +1424,12 @@ async function saveAsset() {
     await sbInsert('assets',{name,value:val,type,is_emergency:emerg});
     closeModal('modal-asset');
     await loadData(); renderInvestments(); toast('Ativo salvo!');
-  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao salvar ativo'); }
 }
 async function deleteAsset(id) {
   if (!confirm('Remover ativo?')) return;
   try { await sbDelete('assets',id); await loadData(); renderInvestments(); toast('Ativo removido.'); }
-  catch(e) { toast(`Erro: ${e.message}`,'r'); }
+  catch(e) { handleErr(e, 'Erro ao remover'); }
 }
 async function saveDebt() {
   const name=v('d-name'), type=v('d-type'), total=parseFloat(v('d-total'))||0, monthly=parseFloat(v('d-monthly'))||0,
@@ -1407,12 +1439,12 @@ async function saveDebt() {
     await sbInsert('debts',{name,type,total_amount:total,monthly_payment:monthly,paid_installments:paid,total_installments:totalInst,interest_rate:rate});
     closeModal('modal-debt');
     await loadData(); renderDebts(); toast('Dívida adicionada.');
-  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao salvar dívida'); }
 }
 async function deleteDebt(id) {
   if (!confirm('Remover dívida?')) return;
   try { await sbDelete('debts',id); await loadData(); renderDebts(); toast('Dívida removida.'); }
-  catch(e) { toast(`Erro: ${e.message}`,'r'); }
+  catch(e) { handleErr(e, 'Erro ao remover'); }
 }
 async function saveGoal() {
   const name=v('g-name'), icon=v('g-icon'), target=parseFloat(v('g-target')), saved=parseFloat(v('g-saved'))||0, date=v('g-date');
@@ -1422,12 +1454,12 @@ async function saveGoal() {
     closeModal('modal-goal');
     document.getElementById('g-name').value=''; document.getElementById('g-icon').value=''; document.getElementById('g-target').value=''; document.getElementById('g-saved').value=''; document.getElementById('g-date').value='';
     await loadData(); renderGoals(); toast('Meta criada! 🎯');
-  } catch(e) { toast(`Erro ao salvar: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao criar meta'); }
 }
 async function deleteGoal(id) {
   if (!confirm('Remover meta?')) return;
   try { await sbDelete('goals',id); await loadData(); renderGoals(); toast('Meta removida.'); }
-  catch(e) { toast(`Erro: ${e.message}`,'r'); }
+  catch(e) { handleErr(e, 'Erro ao remover'); }
 }
 async function addToGoal(id) {
   const amt = parseFloat(prompt('Quanto você alocou para esta meta? (R$)')||'0');
@@ -1436,7 +1468,7 @@ async function addToGoal(id) {
   try {
     await sbUpdate('goals',id,{saved:(g.saved||0)+amt});
     await loadData(); renderGoals(); toast(`${fmt(amt)} aportados na meta!`);
-  } catch(e) { toast(`Erro: ${e.message}`,'r'); }
+  } catch(e) { handleErr(e, 'Erro ao aportar'); }
 }
 function onAssetType() {
   document.getElementById('fipe-block').style.display = v('a-type')==='car' ? 'block' : 'none';
@@ -1643,11 +1675,10 @@ async function saveConnection() {
     await renderAccounts();
     toast('Banco conectado! Clique em Sincronizar para importar os dados.');
   } catch(e) {
-    // Duplicata é o erro mais comum — UUID já existe para este usuário
     if (e.message?.includes('duplicate') || e.message?.includes('unique')) {
       toast('Este Item ID já está conectado.', 'y');
     } else {
-      toast(`Erro ao conectar: ${e.message}`, 'r');
+      handleErr(e, 'Erro ao conectar banco');
     }
   }
 }
