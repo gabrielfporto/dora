@@ -882,7 +882,7 @@ async function syncPluggy() {
       let pageCount = 0;
       const MAX_PAGES = 5; // até 500 transações por conta
       do {
-        const qs = `/v2/transactions?accountId=${acc.id}&pageSize=100${cursor ? '&cursor=' + cursor : ''}`;
+        const qs = `/v2/transactions?accountId=${acc.id}&page[limit]=100${cursor ? '&cursor=' + cursor : ''}`;
         const txData = await pGet(qs);
         if (!txData?.results?.length) break;
         allTxns = [...allTxns, ...txData.results];
