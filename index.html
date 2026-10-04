@@ -925,17 +925,35 @@ async function pGet(path) {
     const r = await fetch(`${C.FN_PLUGGY}?path=${encodeURIComponent(path)}`, {
       headers: { 'Authorization': `Bearer ${S.user.sbToken}` }
     });
-    return await r.json();
-  } catch { return null; }
+    if (!r.ok) {
+      const txt = await r.text();
+      console.error(`[pGet] ${r.status} ${path}:`, txt);
+      return null;
+    }
+    const data = await r.json();
+    console.log(`[pGet] OK ${path} →`, data);
+    return data;
+  } catch(e) {
+    console.error(`[pGet] fetch error ${path}:`, e);
+    return null;
+  }
 }
 
 async function syncPluggy() {
   const btn = document.getElementById('sync-btn');
   btn.textContent = '⏳ Sincronizando...'; btn.style.pointerEvents = 'none';
 
+  // Busca conexões — select só colunas que existem no schema
   let conns = [];
-  try { conns = await sbReq('/rest/v1/pluggy_connections?select=item_id,bank_name') || []; }
-  catch { conns = []; }
+  try {
+    conns = await sbReq('/rest/v1/pluggy_connections?select=id,item_id,bank_name,created_at') || [];
+    console.log('[sync] conexões encontradas:', conns);
+  } catch(e) {
+    console.error('[sync] erro ao buscar conexões:', e);
+    // Tenta sem bank_name se der erro de coluna
+    try { conns = await sbReq('/rest/v1/pluggy_connections?select=id,item_id,created_at') || []; }
+    catch { conns = []; }
+  }
 
   const items = conns.map(c => c.item_id);
   if (!items.length) {
@@ -943,81 +961,118 @@ async function syncPluggy() {
     toast('Nenhuma conta conectada. Vá em Contas para adicionar.', 'y'); return;
   }
 
-  let allAccs = [], allTxns = [], errors = [];   // ← allTxns estava faltando
+  let allAccs = [], allTxns = [], errors = [], txnCount = 0;
 
   for (const itemId of items) {
-    const bankName = conns.find(c=>c.item_id===itemId)?.bank_name || itemId;
+    const conn = conns.find(c => c.item_id === itemId);
+    const bankName = conn?.bank_name || itemId.slice(0,8);
+
+    console.log(`[sync] buscando contas do item ${itemId} (${bankName})...`);
     const accData = await pGet(`/accounts?itemId=${itemId}`);
-    if (!accData?.results) { errors.push(bankName); continue; }
+    if (!accData?.results?.length) {
+      console.error(`[sync] sem resultados para item ${itemId}`, accData);
+      errors.push(bankName); continue;
+    }
+
+    console.log(`[sync] ${accData.results.length} conta(s) em ${bankName}`);
 
     for (const acc of accData.results) {
       const accType = acc.type || 'BANK';
-      // bank_name salvo para lookup de logo depois
       const accRow = {
-        id: acc.id, item_id: itemId, user_id: S.user.id,
-        name: acc.name, bank_name: bankName,
-        type: accType, subtype: acc.subtype || null,
-        balance: acc.balance || 0,
-        credit_limit:     acc.creditData?.creditLimit            || null,
-        available_credit: acc.creditData?.availableCreditLimit   || null,
-        current_invoice:  acc.creditData?.currentBalance         || null,
-        due_date:         acc.creditData?.dueDate                || null,
-        brand:            acc.creditData?.brand                  || null,
+        id:               acc.id,
+        item_id:          itemId,
+        user_id:          S.user.id,
+        name:             acc.name,
+        bank_name:        bankName,           // coluna adicionada via dora_schema_patch.sql
+        type:             accType,
+        subtype:          acc.subtype       || null,
+        balance:          acc.balance       || 0,
+        credit_limit:     acc.creditData?.creditLimit          || null,
+        available_credit: acc.creditData?.availableCreditLimit || null,
+        current_invoice:  acc.creditData?.currentBalance       || null,
+        due_date:         acc.creditData?.dueDate              || null,
+        brand:            acc.creditData?.brand                || null,
       };
-      await sbUpsert('accounts', accRow);
-      allAccs.push(accRow);
+      accRow._bankName = bankName; // também em memória para logo lookup imediato
+      try {
+        await sbUpsert('accounts', accRow);
+        allAccs.push(accRow);
+        console.log(`[sync] conta salva: ${acc.name} (${accType})`);
+      } catch(e) {
+        console.error(`[sync] erro ao salvar conta ${acc.name}:`, e.message);
+      }
 
-      // Transações
+      // ── Transações ──
+      console.log(`[sync] buscando transações da conta ${acc.id}...`);
       const txData = await pGet(`/transactions?accountId=${acc.id}&pageSize=200`);
-      if (txData?.results) {
-        for (const tx of txData.results) {
-          const txRow = {
-            id: tx.id, account_id: acc.id, item_id: itemId, user_id: S.user.id,
-            description: tx.description || null,
-            amount: tx.amount,
-            date: (tx.date || '').split('T')[0],
-            type: tx.type || null,
-            category: tx.category || autoCategory(tx.description),
-            installments_total:   tx.paymentData?.installments?.total  || null,
-            installments_current: tx.paymentData?.installments?.number || null,
-          };
-          await sbUpsert('transactions', txRow);
-          allTxns.push(txRow);
+      if (!txData?.results?.length) {
+        console.warn(`[sync] sem transações para conta ${acc.id}`, txData);
+      } else {
+        console.log(`[sync] ${txData.results.length} transações encontradas`);
+        // Salva em lotes de 10 para não sobrecarregar
+        const rows = txData.results.map(tx => ({
+          id:                   tx.id,
+          account_id:           acc.id,
+          item_id:              itemId,
+          user_id:              S.user.id,
+          description:          tx.description          || null,
+          amount:               tx.amount,
+          date:                 (tx.date || '').split('T')[0],
+          type:                 tx.type                 || null,
+          category:             tx.category             || autoCategory(tx.description),
+          installments_total:   tx.paymentData?.installments?.total  || null,
+          installments_current: tx.paymentData?.installments?.number || null,
+        }));
+
+        // Upsert em lote (array) — muito mais rápido que um por vez
+        try {
+          await sbReq('/rest/v1/transactions', {
+            method: 'POST',
+            headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify(rows)
+          });
+          allTxns.push(...rows);
+          txnCount += rows.length;
+          console.log(`[sync] ${rows.length} transações salvas em lote`);
+        } catch(e) {
+          console.error('[sync] erro ao salvar transações em lote:', e.message);
+          // Fallback: tenta uma a uma para identificar qual está quebrando
+          for (const row of rows) {
+            try { await sbUpsert('transactions', row); allTxns.push(row); txnCount++; }
+            catch(e2) { console.error('[sync] tx individual falhou:', row.id, e2.message); }
+          }
         }
       }
 
-      // Investimentos
+      // ── Investimentos ──
       if (accType === 'INVESTMENT' || acc.subtype?.includes('INVEST')) {
-        await sbUpsert('assets', {
-          id: acc.id, user_id: S.user.id,
-          name: acc.name, value: acc.balance || 0,
-          type: 'investment', is_emergency: false
-        });
+        try {
+          await sbUpsert('assets', { id: acc.id, user_id: S.user.id, name: acc.name, value: acc.balance || 0, type: 'investment', is_emergency: false });
+        } catch(e) { console.error('[sync] erro ao salvar investimento:', e.message); }
       }
 
-      // Dívidas / financiamentos
+      // ── Dívidas ──
       if (['LOAN','FINANCING'].includes(accType) || acc.subtype?.includes('LOAN')) {
-        await sbUpsert('debts', {
-          id: acc.id, user_id: S.user.id,
-          name: acc.name, total_amount: Math.abs(acc.balance || 0),
-          monthly_payment: 0, type: 'Financiamento', source: 'pluggy'
-        });
+        try {
+          await sbUpsert('debts', { id: acc.id, user_id: S.user.id, name: acc.name, total_amount: Math.abs(acc.balance || 0), monthly_payment: 0, type: 'Financiamento', source: 'pluggy' });
+        } catch(e) { console.error('[sync] erro ao salvar dívida:', e.message); }
       }
     }
   }
-  S.accounts = allAccs;
+
   await loadData();
   renderPage(curPage());
   btn.style.pointerEvents = 'auto';
+
   if (errors.length && allAccs.length === 0) {
     btn.textContent = '⚠ Erro na sync';
-    toast(`Não foi possível conectar: ${errors.join(', ')}. Verifique o Item ID.`, 'r');
+    toast(`Erro ao conectar: ${errors.join(', ')}. Veja o console para detalhes.`, 'r');
   } else if (errors.length) {
     btn.textContent = '⚠ Parcial';
     toast(`Sincronizado parcialmente. Erro em: ${errors.join(', ')}.`, 'y');
   } else {
     btn.textContent = '✓ Sincronizado';
-    toast('Contas sincronizadas com sucesso!');
+    toast(`Sincronizado! ${allAccs.length} conta(s) · ${txnCount} transações.`);
   }
   setTimeout(() => { btn.textContent = '🔄 Sincronizar'; }, 4000);
 }
@@ -1230,11 +1285,16 @@ const BANK_DOMAINS = {
 };
 
 function getBankDomain(name, bankName) {
+  // aceita bank_name (coluna DB) ou _bankName (campo temporário em memória)
   const search = [(name||''), (bankName||'')].join(' ').toLowerCase();
   for (const [key, domain] of Object.entries(BANK_DOMAINS)) {
     if (search.includes(key)) return domain;
   }
   return null;
+}
+// Wrapper que lê ambos os campos do objeto account
+function acctDomain(acc) {
+  return getBankDomain(acc.name, acc.bank_name || acc._bankName || '');
 }
 
 // Retorna um <img> com logo ou fallback emoji
