@@ -739,9 +739,10 @@ function handleErr(e, fallbackMsg) {
 
 // CRUD helpers — todos retornam null em erro (sbReq lança, aqui a gente pesca)
 async function sbGet(table, qs = '') {
-  const uid = S.user?.id ? `&user_id=eq.${S.user.id}` : '';
+  // user_id primeiro para garantir que o índice seja usado pelo PostgREST
+  const uid = S.user?.id ? `user_id=eq.${S.user.id}&` : '';
   try {
-    const res = await sbReq(`/rest/v1/${table}?${qs}${uid}`);
+    const res = await sbReq(`/rest/v1/${table}?${uid}${qs}`);
     return Array.isArray(res) ? res : [];
   } catch { return []; }
 }
@@ -942,44 +943,65 @@ async function syncPluggy() {
     toast('Nenhuma conta conectada. Vá em Contas para adicionar.', 'y'); return;
   }
 
-  let allAccs = [], errors = [];
+  let allAccs = [], allTxns = [], errors = [];   // ← allTxns estava faltando
+
   for (const itemId of items) {
     const bankName = conns.find(c=>c.item_id===itemId)?.bank_name || itemId;
     const accData = await pGet(`/accounts?itemId=${itemId}`);
     if (!accData?.results) { errors.push(bankName); continue; }
-    allAccs = [...allAccs, ...accData.results];
+
     for (const acc of accData.results) {
       const accType = acc.type || 'BANK';
-      await sbUpsert('accounts', {
-        id: acc.id, item_id: itemId, name: acc.name, type: accType,
-        subtype: acc.subtype, balance: acc.balance || 0,
-        credit_limit: acc.creditData?.creditLimit || null,
-        available_credit: acc.creditData?.availableCreditLimit || null,
-        current_invoice: acc.creditData?.currentBalance || null,
-        due_date: acc.creditData?.dueDate || null,
-        brand: acc.creditData?.brand || null
-      });
+      // bank_name salvo para lookup de logo depois
+      const accRow = {
+        id: acc.id, item_id: itemId, user_id: S.user.id,
+        name: acc.name, bank_name: bankName,
+        type: accType, subtype: acc.subtype || null,
+        balance: acc.balance || 0,
+        credit_limit:     acc.creditData?.creditLimit            || null,
+        available_credit: acc.creditData?.availableCreditLimit   || null,
+        current_invoice:  acc.creditData?.currentBalance         || null,
+        due_date:         acc.creditData?.dueDate                || null,
+        brand:            acc.creditData?.brand                  || null,
+      };
+      await sbUpsert('accounts', accRow);
+      allAccs.push(accRow);
+
       // Transações
-      const txData = await pGet(`/transactions?accountId=${acc.id}&pageSize=100`);
+      const txData = await pGet(`/transactions?accountId=${acc.id}&pageSize=200`);
       if (txData?.results) {
-        allTxns = [...allTxns, ...txData.results];
         for (const tx of txData.results) {
-          await sbUpsert('transactions', {
-            id: tx.id, account_id: acc.id, item_id: itemId,
-            description: tx.description, amount: tx.amount, date: tx.date.split('T')[0],
-            type: tx.type, category: tx.category || autoCategory(tx.description),
-            installments_total: tx.paymentData?.installments?.total || null,
-            installments_current: tx.paymentData?.installments?.number || null
-          });
+          const txRow = {
+            id: tx.id, account_id: acc.id, item_id: itemId, user_id: S.user.id,
+            description: tx.description || null,
+            amount: tx.amount,
+            date: (tx.date || '').split('T')[0],
+            type: tx.type || null,
+            category: tx.category || autoCategory(tx.description),
+            installments_total:   tx.paymentData?.installments?.total  || null,
+            installments_current: tx.paymentData?.installments?.number || null,
+          };
+          await sbUpsert('transactions', txRow);
+          allTxns.push(txRow);
         }
       }
-      // Investimentos via Pluggy (se suportado)
+
+      // Investimentos
       if (accType === 'INVESTMENT' || acc.subtype?.includes('INVEST')) {
-        await sbUpsert('assets', { id: acc.id, name: acc.name, value: acc.balance || 0, type: 'investment', is_emergency: false });
+        await sbUpsert('assets', {
+          id: acc.id, user_id: S.user.id,
+          name: acc.name, value: acc.balance || 0,
+          type: 'investment', is_emergency: false
+        });
       }
-      // Financiamentos / dívidas via Pluggy
-      if (accType === 'LOAN' || accType === 'FINANCING' || acc.subtype?.includes('LOAN')) {
-        await sbUpsert('debts', { id: acc.id, name: acc.name, total_amount: Math.abs(acc.balance || 0), monthly_payment: 0, type: 'Financiamento', source: 'pluggy' });
+
+      // Dívidas / financiamentos
+      if (['LOAN','FINANCING'].includes(accType) || acc.subtype?.includes('LOAN')) {
+        await sbUpsert('debts', {
+          id: acc.id, user_id: S.user.id,
+          name: acc.name, total_amount: Math.abs(acc.balance || 0),
+          monthly_payment: 0, type: 'Financiamento', source: 'pluggy'
+        });
       }
     }
   }
@@ -1185,6 +1207,74 @@ function renderBudget() {
 }
 
 // ══════════════════════════════════════════════════════
+// BANK LOGOS + CARD ART
+// ══════════════════════════════════════════════════════
+const LOGO_TOKEN = 'pk_Eoub8glOQvCLAyRldVYRiQ';
+
+// Mapeia nome/banco → domínio para logo.dev
+const BANK_DOMAINS = {
+  'itaú': 'itau.com', 'itau': 'itau.com',
+  'santander': 'santander.com.br',
+  'nubank': 'nubank.com.br', 'nu': 'nubank.com.br',
+  'bradesco': 'bradesco.com.br',
+  'inter': 'inter.co', 'banco inter': 'inter.co',
+  'c6': 'c6bank.com.br', 'c6 bank': 'c6bank.com.br',
+  'caixa': 'caixa.gov.br',
+  'bb': 'bb.com.br', 'banco do brasil': 'bb.com.br',
+  'xp': 'xp.com.br',
+  'btg': 'btgpactual.com',
+  'neon': 'neon.com.br',
+  'original': 'original.com.br',
+  'sicoob': 'sicoob.com.br',
+  'sicredi': 'sicredi.com.br',
+};
+
+function getBankDomain(name, bankName) {
+  const search = [(name||''), (bankName||'')].join(' ').toLowerCase();
+  for (const [key, domain] of Object.entries(BANK_DOMAINS)) {
+    if (search.includes(key)) return domain;
+  }
+  return null;
+}
+
+// Retorna um <img> com logo ou fallback emoji
+function bankLogoHTML(name, bankName, size = 36) {
+  const domain = getBankDomain(name, bankName);
+  if (!domain) {
+    return `<span style="font-size:${size * 0.55}px">🏦</span>`;
+  }
+  return `<img src="https://img.logo.dev/${domain}?token=${LOGO_TOKEN}&format=webp&retina=true"
+    alt="${name}" width="${size}" height="${size}"
+    style="border-radius:${size * 0.25}px;object-fit:contain;background:#fff"
+    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+    <span style="display:none;font-size:${size * 0.55}px">🏦</span>`;
+}
+
+// Gradientes por bandeira de cartão
+const CARD_GRADIENTS = {
+  'visa':       'linear-gradient(135deg,#1a1f71 0%,#2d6cdf 100%)',
+  'mastercard': 'linear-gradient(135deg,#1c1c1c 0%,#eb5c00 100%)',
+  'elo':        'linear-gradient(135deg,#141414 0%,#FFD700 100%)',
+  'amex':       'linear-gradient(135deg,#007bc1 0%,#00c6fb 100%)',
+  'hipercard':  'linear-gradient(135deg,#b01116 0%,#e63946 100%)',
+};
+function cardGradient(brand) {
+  if (!brand) return 'linear-gradient(135deg,#2d2d2d 0%,#555 100%)';
+  const b = brand.toLowerCase();
+  for (const [k, v] of Object.entries(CARD_GRADIENTS)) if (b.includes(k)) return v;
+  return 'linear-gradient(135deg,#4a4a6a 0%,#7C6FF7 100%)';
+}
+function cardBrandIcon(brand) {
+  if (!brand) return '💳';
+  const b = brand.toLowerCase();
+  if (b.includes('visa')) return `<svg viewBox="0 0 50 16" width="38" height="12" fill="white" xmlns="http://www.w3.org/2000/svg"><text x="0" y="13" font-size="16" font-family="Arial" font-weight="700" letter-spacing="-1">VISA</text></svg>`;
+  if (b.includes('master')) return `<svg viewBox="0 0 38 24" width="38" height="24" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="12" r="12" fill="#EB001B" opacity=".9"/><circle cx="24" cy="12" r="12" fill="#F79E1B" opacity=".9"/><path d="M19 5.3a12 12 0 0 1 0 13.4A12 12 0 0 1 19 5.3z" fill="#FF5F00"/></svg>`;
+  if (b.includes('elo')) return `<span style="font-size:11px;font-weight:700;letter-spacing:1px;color:#FFD700">ELO</span>`;
+  if (b.includes('amex') || b.includes('american')) return `<span style="font-size:10px;font-weight:700;color:#fff">AMEX</span>`;
+  return `<span style="font-size:11px;font-weight:600;opacity:.8">${brand.toUpperCase().slice(0,6)}</span>`;
+}
+
+// ══════════════════════════════════════════════════════
 // RENDER: CARDS
 // ══════════════════════════════════════════════════════
 function renderCards() {
@@ -1195,19 +1285,56 @@ function renderCards() {
   }
   el.innerHTML = cards.map(c => {
     const used = c.current_invoice||0, lim = c.credit_limit||0, avail = c.available_credit||(lim-used);
-    const p = lim>0 ? Math.min((used/lim)*100,100) : 0;
-    const col = p>90?'pbf-r':p>70?'pbf-y':'pbf-g';
+    const p = lim > 0 ? Math.min((used/lim)*100, 100) : 0;
+    const barCol = p>90?'pbf-r':p>70?'pbf-y':'pbf-g';
     const due = c.due_date ? new Date(c.due_date).toLocaleDateString('pt-BR') : '—';
-    return `<div class="card">
-      <div class="ch"><span class="ch-label">${c.name}</span><span class="pill pill-a">${c.brand||'Crédito'}</span></div>
-      <div style="font-size:28px;font-weight:700;letter-spacing:-1px">${fmt(used)}</div>
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:14px">Fatura atual</div>
-      <div class="pb"><div class="pbf ${col}" style="width:${p}%"></div></div>
-      <div class="row-between" style="font-size:12.5px;color:var(--text-2);margin-top:8px">
-        <span>Disponível <b style="color:var(--text)">${fmt(avail)}</b></span>
-        <span>Limite <b style="color:var(--text)">${fmt(lim)}</b></span>
+    const grad = cardGradient(c.brand);
+    const domain = getBankDomain(c.name, c.bank_name);
+    const logoSrc = domain ? `https://img.logo.dev/${domain}?token=${LOGO_TOKEN}&format=webp&retina=true` : null;
+
+    return `<div class="card" style="padding:0;overflow:hidden">
+      <!-- Cartão visual -->
+      <div style="background:${grad};padding:20px 22px 18px;position:relative;min-height:130px">
+        <!-- Chip + logo banco -->
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px">
+          <svg width="28" height="22" viewBox="0 0 28 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="28" height="22" rx="3" fill="rgba(255,255,255,0.25)"/>
+            <rect x="0" y="7" width="28" height="8" fill="rgba(255,255,255,0.12)"/>
+            <rect x="9" y="0" width="10" height="22" fill="rgba(255,255,255,0.12)"/>
+            <rect x="9" y="7" width="10" height="8" fill="rgba(255,255,255,0.18)"/>
+          </svg>
+          <div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:rgba(255,255,255,0.15);border-radius:8px;overflow:hidden">
+            ${logoSrc
+              ? `<img src="${logoSrc}" width="28" height="28" style="object-fit:contain;border-radius:6px" onerror="this.parentElement.innerHTML='<span style=font-size:16px>🏦</span>'">`
+              : `<span style="font-size:16px">🏦</span>`}
+          </div>
+        </div>
+        <!-- Número mascarado -->
+        <div style="font-size:13px;letter-spacing:3px;color:rgba(255,255,255,0.6);margin-bottom:10px">•••• •••• •••• ––––</div>
+        <!-- Nome e bandeira -->
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:0.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</div>
+          <div>${cardBrandIcon(c.brand)}</div>
+        </div>
       </div>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-2)">Vencimento <b style="color:var(--yellow)">${due}</b></div>
+      <!-- Dados abaixo do cartão -->
+      <div style="padding:16px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+          <div>
+            <div style="font-size:11.5px;color:var(--text-2)">Fatura atual</div>
+            <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;margin-top:2px">${fmt(used)}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11.5px;color:var(--text-2)">Vencimento</div>
+            <div style="font-size:14px;font-weight:600;color:var(--yellow);margin-top:2px">${due}</div>
+          </div>
+        </div>
+        <div class="pb" style="margin-bottom:8px"><div class="pbf ${barCol}" style="width:${p}%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2)">
+          <span>Disponível <b style="color:var(--text)">${fmt(avail)}</b></span>
+          <span>Limite <b style="color:var(--text)">${fmt(lim)}</b></span>
+        </div>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1637,13 +1764,17 @@ async function renderAccounts() {
   }
 
   wrap.innerHTML = conns.map(c => {
-    const icons = { 'itaú': '🟠', 'santander': '🔴', 'nubank': '🟣', 'bradesco': '🔵', 'inter': '🟠', 'c6': '⚫' };
-    const key = Object.keys(icons).find(k => c.bank_name.toLowerCase().includes(k));
-    const icon = icons[key] || '🏦';
     const date = new Date(c.created_at).toLocaleDateString('pt-BR');
+    const domain = getBankDomain(c.bank_name, c.bank_name);
     return `<div class="card card-sm" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:12px">
-        <div style="width:40px;height:40px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${icon}</div>
+        <div style="width:42px;height:42px;background:var(--surface2);border-radius:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+          ${domain
+            ? `<img src="https://img.logo.dev/${domain}?token=${LOGO_TOKEN}&format=webp&retina=true"
+                width="36" height="36" style="object-fit:contain;border-radius:8px"
+                onerror="this.parentElement.innerHTML='<span style=font-size:20px>🏦</span>'">`
+            : `<span style="font-size:20px">🏦</span>`}
+        </div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:14px">${c.bank_name}</div>
           <div style="font-size:12px;color:var(--text-3);margin-top:2px">Conectado em ${date}</div>
