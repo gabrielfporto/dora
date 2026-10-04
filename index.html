@@ -838,11 +838,16 @@ function renderPage(p) {
 // Pluggy agora vai via Edge Function (credenciais ficam no servidor)
 async function pGet(path) {
   try {
-    const r = await fetch(`${C.FN_PLUGGY}?path=${encodeURIComponent(path)}`, {
+    // Passa o path sem encodeURIComponent — a edge function recebe e repassa direto à Pluggy
+    const url = `${C.FN_PLUGGY}?path=${path}`;
+    const r = await fetch(url, {
       headers: { 'Authorization': `Bearer ${S.user.sbToken}` }
     });
-    return await r.json();
-  } catch { return null; }
+    const data = await r.json();
+    if (!r.ok) console.error('[pGet] erro', r.status, path, data);
+    else console.log('[pGet] OK', path, data?.results?.length ?? data);
+    return data;
+  } catch(e) { console.error('[pGet] exception', e); return null; }
 }
 
 async function syncPluggy() {
@@ -882,7 +887,9 @@ async function syncPluggy() {
       let pageCount = 0;
       const MAX_PAGES = 5; // até 500 transações por conta
       do {
-        const qs = `/v2/transactions?accountId=${acc.id}&page[limit]=100${cursor ? '&cursor=' + cursor : ''}`;
+        // Pluggy v2: sem pageSize/page[limit], filtra por data (últimos 90 dias)
+        const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const qs = `/v2/transactions?accountId=${acc.id}&from=${from}${cursor ? '&cursor=' + cursor : ''}`;
         const txData = await pGet(qs);
         if (!txData?.results?.length) break;
         allTxns = [...allTxns, ...txData.results];
