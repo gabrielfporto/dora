@@ -1443,6 +1443,9 @@ function toast(msg, type='g') {
 // ══════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════
+if (tryResumeSession()) launchApp();
+</script>
+
 <!-- Modal: Conectar banco -->
 <div class="modal-bg" id="modal-connect">
   <div class="modal">
@@ -1467,11 +1470,8 @@ function toast(msg, type='g') {
     <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveConnection()">Conectar</button>
   </div>
 </div>
-<script>
-// (Modais já declarados acima)
-</script>
-<script>
 
+<script>
 // ══════════════════════════════════════════════════════
 // CONTAS (Open Banking via Pluggy)
 // ══════════════════════════════════════════════════════
@@ -1536,7 +1536,6 @@ async function deleteConnection(id) {
   toast('Conexão removida.');
 }
 
-if (tryResumeSession()) launchApp();
 </script>
 </body>
 </html>
