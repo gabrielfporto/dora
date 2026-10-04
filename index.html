@@ -631,60 +631,18 @@ applyTheme();
 // ══════════════════════════════════════════════════════
 // SUPABASE
 // ══════════════════════════════════════════════════════
-
-// Renova proativamente se o token expira em < 60s
-let _refreshPromise = null;
-async function ensureToken() {
-  if (!S.user?.sbToken) return;
-  try {
-    const payload = JSON.parse(atob(S.user.sbToken.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-    if (payload.exp - Math.floor(Date.now() / 1000) > 60) return; // ainda válido
-  } catch { /* malformado — tenta renovar */ }
-  if (!_refreshPromise) {
-    _refreshPromise = sbRefreshToken(S.user.refreshToken).finally(() => { _refreshPromise = null; });
-  }
-  const renewed = await _refreshPromise;
-  if (renewed?.access_token) {
-    S.user.sbToken      = renewed.access_token;
-    S.user.refreshToken = renewed.refresh_token || S.user.refreshToken;
-    localStorage.setItem('dora-session', JSON.stringify(S.user));
-  } else {
-    localStorage.removeItem('dora-session'); S.user = null;
-    document.getElementById('app-screen').style.display = 'none';
-    document.getElementById('auth-screen').style.display = 'flex';
-    throw new Error('Sessão expirada. Faça login novamente.');
-  }
-}
-
-// Centraliza mensagens de erro — diferencia sessão expirada de outros erros
-function handleErr(e, label) {
-  const msg = e?.message || '';
-  if (msg.includes('expirada') || msg.includes('expired') || msg.includes('JWT')) {
-    toast('Sessão expirada. Faça login novamente.', 'r');
-  } else {
-    toast(label ? `${label}: ${msg}` : msg || 'Erro desconhecido', 'r');
-  }
-}
-
 async function sbReq(path, opts = {}) {
-  await ensureToken(); // garante token válido — lança se sessão morta
   const r = await fetch(`${C.SB_URL}${path}`, {
     ...opts,
     headers: {
-      'apikey':        C.SB_KEY,
+      'apikey': C.SB_KEY,
       'Authorization': `Bearer ${S.user?.sbToken || C.SB_KEY}`,
-      'Content-Type':  'application/json',
-      // sem Prefer padrão — cada operação define o seu via opts.headers
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
       ...opts.headers
     }
   });
-  if (!r.ok) {
-    let errMsg = `Erro ${r.status}`;
-    try { const e = await r.json(); errMsg = e?.message || e?.hint || errMsg; } catch {}
-    console.warn('SB err', r.status, path, errMsg);
-    throw new Error(errMsg);
-  }
-  if (r.status === 204) return true;
+  if (!r.ok) { const e = await r.text(); console.warn('SB err', path, e); return null; }
   try { return await r.json(); } catch { return []; }
 }
 
@@ -723,40 +681,25 @@ async function sbRefreshToken(refreshToken) {
 
 // CRUD helpers
 async function sbGet(table, qs = '') {
-  // user_id PRIMEIRO → PostgREST usa o índice corretamente
-  const uid = S.user?.id ? `user_id=eq.${S.user.id}&` : '';
-  try {
-    const res = await sbReq(`/rest/v1/${table}?${uid}${qs}`);
-    return Array.isArray(res) ? res : [];
-  } catch { return []; } // leitura: falha silenciosa, retorna vazio
+  const uid = S.user?.id ? `&user_id=eq.${S.user.id}` : '';
+  const res = await sbReq(`/rest/v1/${table}?${qs}${uid}`);
+  return Array.isArray(res) ? res : [];
 }
 async function sbInsert(table, data) {
-  // lança para o caller exibir o erro correto via handleErr
-  return sbReq(`/rest/v1/${table}`, {
-    method: 'POST',
-    headers: { 'Prefer': 'return=representation' },
-    body: JSON.stringify({ ...data, user_id: S.user?.id })
-  });
+  return sbReq(`/rest/v1/${table}`, { method: 'POST', body: JSON.stringify({ ...data, user_id: S.user?.id }) });
 }
 async function sbUpdate(table, id, data) {
-  return sbReq(`/rest/v1/${table}?id=eq.${id}`, {
-    method: 'PATCH',
-    headers: { 'Prefer': 'return=representation' },
-    body: JSON.stringify(data)
-  });
+  return sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }
 async function sbDelete(table, id) {
   return sbReq(`/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE' });
 }
 async function sbUpsert(table, data) {
-  try {
-    return await sbReq(`/rest/v1/${table}`, {
-      method: 'POST',
-      // return=minimal → não devolve o body, muito mais rápido em lote
-      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ ...data, user_id: S.user?.id })
-    });
-  } catch(e) { console.warn(`sbUpsert ${table}:`, e.message); return null; }
+  return sbReq(`/rest/v1/${table}`, {
+    method: 'POST',
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({ ...data, user_id: S.user?.id })
+  });
 }
 
 // ══════════════════════════════════════════════════════
@@ -816,22 +759,21 @@ async function tryResumeSession() {
   if (!saved) return false;
   try {
     S.user = JSON.parse(saved);
-    if (!S.user.refreshToken) { localStorage.removeItem('dora-session'); return false; }
-    const res = await sbRefreshToken(S.user.refreshToken);
-    if (res.access_token) {
-      S.user.sbToken      = res.access_token;
-      S.user.refreshToken = res.refresh_token || S.user.refreshToken;
-      localStorage.setItem('dora-session', JSON.stringify(S.user));
-      return true;
+    // Tentar renovar o token sempre que retomar sessão
+    if (S.user.refreshToken) {
+      const res = await sbRefreshToken(S.user.refreshToken);
+      if (res.access_token) {
+        S.user.sbToken = res.access_token;
+        S.user.refreshToken = res.refresh_token || S.user.refreshToken;
+        localStorage.setItem('dora-session', JSON.stringify(S.user));
+      } else {
+        // Refresh token inválido — forçar novo login
+        localStorage.removeItem('dora-session');
+        return false;
+      }
     }
-    // Refresh expirado (> 7 dias sem abrir) — avisa na tela de login
-    localStorage.removeItem('dora-session'); S.user = null;
-    setTimeout(() => {
-      const el = document.getElementById('auth-success');
-      if (el) { el.textContent='Sessão expirada. Entre novamente.'; el.style.display='block'; el.style.background='var(--yellow-bg)'; el.style.color='var(--yellow)'; }
-    }, 150);
-    return false;
-  } catch { localStorage.removeItem('dora-session'); return false; }
+    return true;
+  } catch { return false; }
 }
 
 // ══════════════════════════════════════════════════════
@@ -893,135 +835,91 @@ function renderPage(p) {
 // ══════════════════════════════════════════════════════
 // PLUGGY SYNC
 // ══════════════════════════════════════════════════════
+// Pluggy agora vai via Edge Function (credenciais ficam no servidor)
 async function pGet(path) {
   try {
     const r = await fetch(`${C.FN_PLUGGY}?path=${encodeURIComponent(path)}`, {
       headers: { 'Authorization': `Bearer ${S.user.sbToken}` }
     });
-    if (!r.ok) { console.error(`[pGet] ${r.status} ${path}:`, await r.text()); return null; }
-    const data = await r.json();
-    console.log(`[pGet] OK ${path} — ${data?.results?.length ?? JSON.stringify(data).slice(0,80)}`);
-    return data;
-  } catch(e) { console.error(`[pGet] erro ${path}:`, e); return null; }
+    return await r.json();
+  } catch { return null; }
 }
 
 async function syncPluggy() {
   const btn = document.getElementById('sync-btn');
   btn.textContent = '⏳ Sincronizando...'; btn.style.pointerEvents = 'none';
-
-  // Busca conexões — tenta com bank_name, cai sem se coluna não existir
-  let conns = [];
-  try { conns = await sbReq('/rest/v1/pluggy_connections?select=id,item_id,bank_name,created_at&order=created_at') || []; }
-  catch { try { conns = await sbReq('/rest/v1/pluggy_connections?select=id,item_id,created_at&order=created_at') || []; } catch { conns = []; } }
-  console.log('[sync] conexões:', conns);
-
+  // Buscar conexões do usuário no Supabase
+  const conns = await sbReq('/rest/v1/pluggy_connections?select=item_id,bank_name') || [];
   if (!conns.length) {
     btn.textContent = '🔄 Sincronizar'; btn.style.pointerEvents = 'auto';
     toast('Nenhuma conta conectada. Vá em Contas para adicionar.', 'y'); return;
   }
-
-  let allAccs = [], txnCount = 0, errors = [];
-
+  let allAccs = [], allTxns = [];
   for (const conn of conns) {
-    const itemId   = conn.item_id;
-    const bankName = conn.bank_name || itemId.slice(0, 8);
-
-    // ── Contas ──
-    console.log(`[sync] contas: ${bankName}`);
+    const { item_id: itemId, bank_name: bankName } = conn;
     const accData = await pGet(`/accounts?itemId=${itemId}`);
-    if (!accData?.results?.length) { errors.push(bankName); continue; }
-
+    if (!accData?.results) continue;
+    allAccs = [...allAccs, ...accData.results];
     for (const acc of accData.results) {
       const accType = acc.type || 'BANK';
-      // desestrutura para garantir que _bankName nunca vai para o upsert
-      const { _unused, ...accRow } = {
-        _unused:          undefined,
+      await sbUpsert('accounts', {
         id:               acc.id,
         item_id:          itemId,
-        user_id:          S.user.id,
+        bank_name:        bankName || null,
         name:             acc.name,
-        bank_name:        bankName,
         type:             accType,
-        subtype:          acc.subtype         || null,
-        balance:          acc.balance         || 0,
+        subtype:          acc.subtype || null,
+        balance:          acc.balance || 0,
         credit_limit:     acc.creditData?.creditLimit          || null,
         available_credit: acc.creditData?.availableCreditLimit || null,
         current_invoice:  acc.creditData?.currentBalance       || null,
         due_date:         acc.creditData?.dueDate              || null,
-        brand:            acc.creditData?.brand                || null,
-      };
-      await sbUpsert('accounts', accRow);
-      allAccs.push({ ...accRow, _bankName: bankName }); // _bankName só em memória para logo
+        brand:            acc.creditData?.brand                || null
+      });
 
-      // ── Transações — API v2 com cursor pagination ──
-      console.log(`[sync] transações: ${acc.name}`);
-      const allRows = [];
-      let cursor = null, page = 0;
+      // Transações — Pluggy v2 com cursor pagination
+      let cursor = null;
+      let pageCount = 0;
+      const MAX_PAGES = 5; // até 500 transações por conta
       do {
-        const qs = `accountId=${acc.id}&pageSize=100${cursor ? `&cursor=${cursor}` : ''}`;
-        const txData = await pGet(`/v2/transactions?${qs}`);
-        if (!txData?.results?.length) { console.log(`[sync] sem transações p/ ${acc.name} (pág ${page})`); break; }
-        console.log(`[sync] pág ${page}: ${txData.results.length} tx — ${acc.name}`);
+        const qs = `/v2/transactions?accountId=${acc.id}&pageSize=100${cursor ? '&cursor=' + cursor : ''}`;
+        const txData = await pGet(qs);
+        if (!txData?.results?.length) break;
+        allTxns = [...allTxns, ...txData.results];
         for (const tx of txData.results) {
-          allRows.push({
+          await sbUpsert('transactions', {
             id:                   tx.id,
             account_id:           acc.id,
             item_id:              itemId,
-            user_id:              S.user.id,
-            description:          tx.description          || null,
+            description:          tx.description,
             amount:               tx.amount,
-            date:                 (tx.date || '').split('T')[0],
-            type:                 tx.type                 || null,
-            category:             tx.category             || autoCategory(tx.description),
-            installments_total:   tx.paymentData?.installments?.total  || null,
-            installments_current: tx.paymentData?.installments?.number || null,
+            date:                 (tx.date || tx.operationDate || '').split('T')[0],
+            type:                 tx.type,
+            category:             tx.category || autoCategory(tx.description),
+            installments_total:   tx.paymentData?.installments?.total   || null,
+            installments_current: tx.paymentData?.installments?.number  || null
           });
         }
-        cursor = txData.nextCursor || txData.cursor?.next || null;
-        page++;
-        if (page > 10) break;
-      } while (cursor);
+        cursor = txData.nextCursor || null;
+        pageCount++;
+      } while (cursor && pageCount < MAX_PAGES);
 
-      if (allRows.length) {
-        try {
-          // upsert em lote — 1 chamada para N transações
-          await sbReq('/rest/v1/transactions', {
-            method: 'POST',
-            headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-            body: JSON.stringify(allRows)
-          });
-          txnCount += allRows.length;
-          console.log(`[sync] ✓ ${allRows.length} tx salvas — ${acc.name}`);
-        } catch(e) {
-          console.error('[sync] lote falhou, individual:', e.message);
-          for (const row of allRows) {
-            try { await sbUpsert('transactions', row); txnCount++; }
-            catch(e2) { console.error('[sync] tx falhou:', row.id, e2.message); }
-          }
-        }
-      }
-
-      // ── Investimentos ──
+      // Investimentos via Pluggy
       if (accType === 'INVESTMENT' || acc.subtype?.includes('INVEST')) {
-        await sbUpsert('assets', { id: acc.id, user_id: S.user.id, name: acc.name, value: acc.balance || 0, type: 'investment', is_emergency: false });
+        await sbUpsert('assets', { id: acc.id, name: acc.name, value: acc.balance || 0, type: 'investment', is_emergency: false });
       }
-      // ── Dívidas ──
-      if (['LOAN','FINANCING'].includes(accType) || acc.subtype?.includes('LOAN')) {
-        await sbUpsert('debts', { id: acc.id, user_id: S.user.id, name: acc.name, total_amount: Math.abs(acc.balance || 0), monthly_payment: 0, type: 'Financiamento', source: 'pluggy' });
+      // Financiamentos / dívidas via Pluggy
+      if (accType === 'LOAN' || accType === 'FINANCING' || acc.subtype?.includes('LOAN')) {
+        await sbUpsert('debts', { id: acc.id, name: acc.name, total_amount: Math.abs(acc.balance || 0), monthly_payment: 0, type: 'Financiamento', source: 'pluggy' });
       }
     }
   }
-
-  await loadData(); renderPage(curPage());
-  btn.style.pointerEvents = 'auto';
-  if (errors.length && !allAccs.length) {
-    btn.textContent = '⚠ Erro'; toast(`Erro: ${errors.join(', ')} — veja o console`, 'r');
-  } else if (errors.length) {
-    btn.textContent = '⚠ Parcial'; toast(`Parcial — erro em: ${errors.join(', ')}`, 'y');
-  } else {
-    btn.textContent = '✓ Sincronizado'; toast(`✓ ${allAccs.length} conta(s) · ${txnCount} transações`);
-  }
-  setTimeout(() => { btn.textContent = '🔄 Sincronizar'; }, 4000);
+  S.accounts = allAccs;
+  await loadData();
+  renderPage(curPage());
+  btn.textContent = '✓ Sincronizado'; btn.style.pointerEvents = 'auto';
+  setTimeout(() => { btn.textContent = '🔄 Sincronizar'; }, 3000);
+  toast('Contas sincronizadas com sucesso!');
 }
 
 function autoCategory(desc) {
@@ -1414,27 +1312,18 @@ function renderGoals() {
 async function saveBill() {
   const name=v('b-name'), val=parseFloat(v('b-val')), day=parseInt(v('b-day')), cat=v('b-cat');
   if (!name||!val||!day) return toast('Preencha todos os campos','r');
-  try {
-    await sbInsert('bills',{name,value:val,day,category:cat});
-    closeModal('modal-bill');
-    ['b-name','b-val','b-day'].forEach(id=>document.getElementById(id).value='');
-    await loadData(); renderOverview(); toast('Vencimento adicionado!');
-  } catch(e) { handleErr(e,'Erro ao salvar vencimento'); }
+  await sbInsert('bills',{name,value:val,day,category:cat});
+  closeModal('modal-bill'); await loadData(); renderOverview();
 }
 async function saveCategory() {
   const name=v('c-name'), icon=v('c-icon'), lim=parseFloat(v('c-lim'))||0;
   if (!name) return toast('Informe o nome da categoria','r');
-  try {
-    await sbInsert('categories',{name,icon,limit:lim});
-    closeModal('modal-category');
-    ['c-name','c-icon','c-lim'].forEach(id=>document.getElementById(id).value='');
-    await loadData(); renderBudget(); toast('Categoria criada!');
-  } catch(e) { handleErr(e,'Erro ao salvar categoria'); }
+  await sbInsert('categories',{name,icon,limit:lim});
+  closeModal('modal-category'); await loadData(); renderBudget();
 }
 async function deleteCategory(id) {
   if (!confirm('Remover categoria?')) return;
-  try { await sbDelete('categories',id); await loadData(); renderBudget(); toast('Categoria removida.'); }
-  catch(e) { handleErr(e,'Erro ao remover'); }
+  await sbDelete('categories',id); await loadData(); renderBudget();
 }
 function setBudgetTotal() {
   const v2 = parseFloat(document.getElementById('bt-inp')?.value);
@@ -1443,54 +1332,41 @@ function setBudgetTotal() {
 async function saveAsset() {
   const type=v('a-type'), name=v('a-name'), val=parseFloat(v('a-val'))||0, emerg=v('a-emerg')==='yes';
   if (!name||!val) return toast('Preencha nome e valor','r');
-  try {
-    if (emerg) for (const a of S.assets.filter(x=>x.is_emergency)) await sbUpdate('assets',a.id,{is_emergency:false});
-    await sbInsert('assets',{name,value:val,type,is_emergency:emerg});
-    closeModal('modal-asset'); await loadData(); renderInvestments(); toast('Ativo salvo!');
-  } catch(e) { handleErr(e,'Erro ao salvar ativo'); }
+  if (emerg) for (const a of S.assets.filter(x=>x.is_emergency)) await sbUpdate('assets',a.id,{is_emergency:false});
+  await sbInsert('assets',{name,value:val,type,is_emergency:emerg});
+  closeModal('modal-asset'); await loadData(); renderInvestments();
 }
 async function deleteAsset(id) {
   if (!confirm('Remover ativo?')) return;
-  try { await sbDelete('assets',id); await loadData(); renderInvestments(); toast('Ativo removido.'); }
-  catch(e) { handleErr(e,'Erro ao remover'); }
+  await sbDelete('assets',id); await loadData(); renderInvestments();
 }
 async function saveDebt() {
   const name=v('d-name'), type=v('d-type'), total=parseFloat(v('d-total'))||0, monthly=parseFloat(v('d-monthly'))||0,
     paid=parseInt(v('d-paid'))||0, totalInst=parseInt(v('d-total-inst'))||null, rate=parseFloat(v('d-rate'))||null;
   if (!name||!total) return toast('Preencha nome e valor total','r');
-  try {
-    await sbInsert('debts',{name,type,total_amount:total,monthly_payment:monthly,paid_installments:paid,total_installments:totalInst,interest_rate:rate});
-    closeModal('modal-debt'); await loadData(); renderDebts(); toast('Dívida adicionada.');
-  } catch(e) { handleErr(e,'Erro ao salvar dívida'); }
+  await sbInsert('debts',{name,type,total_amount:total,monthly_payment:monthly,paid_installments:paid,total_installments:totalInst,interest_rate:rate});
+  closeModal('modal-debt'); await loadData(); renderDebts();
 }
 async function deleteDebt(id) {
   if (!confirm('Remover dívida?')) return;
-  try { await sbDelete('debts',id); await loadData(); renderDebts(); toast('Dívida removida.'); }
-  catch(e) { handleErr(e,'Erro ao remover'); }
+  await sbDelete('debts',id); await loadData(); renderDebts();
 }
 async function saveGoal() {
   const name=v('g-name'), icon=v('g-icon'), target=parseFloat(v('g-target')), saved=parseFloat(v('g-saved'))||0, date=v('g-date');
   if (!name||!target||!date) return toast('Preencha todos os campos','r');
-  try {
-    await sbInsert('goals',{name,icon,target_value:target,saved,target_date:date});
-    closeModal('modal-goal');
-    ['g-name','g-icon','g-target','g-saved','g-date'].forEach(id=>document.getElementById(id).value='');
-    await loadData(); renderGoals(); toast('Meta criada! 🎯');
-  } catch(e) { handleErr(e,'Erro ao criar meta'); }
+  await sbInsert('goals',{name,icon,target_value:target,saved,target_date:date});
+  closeModal('modal-goal'); await loadData(); renderGoals();
 }
 async function deleteGoal(id) {
   if (!confirm('Remover meta?')) return;
-  try { await sbDelete('goals',id); await loadData(); renderGoals(); toast('Meta removida.'); }
-  catch(e) { handleErr(e,'Erro ao remover'); }
+  await sbDelete('goals',id); await loadData(); renderGoals();
 }
 async function addToGoal(id) {
   const amt = parseFloat(prompt('Quanto você alocou para esta meta? (R$)')||'0');
   if (!amt) return;
   const g = S.goals.find(x=>x.id===id); if (!g) return;
-  try {
-    await sbUpdate('goals',id,{saved:(g.saved||0)+amt});
-    await loadData(); renderGoals(); toast(`${fmt(amt)} aportados!`);
-  } catch(e) { handleErr(e,'Erro ao aportar'); }
+  await sbUpdate('goals',id,{saved:(g.saved||0)+amt});
+  await loadData(); renderGoals();
 }
 function onAssetType() {
   document.getElementById('fipe-block').style.display = v('a-type')==='car' ? 'block' : 'none';
@@ -1645,9 +1521,7 @@ tryResumeSession().then(ok => { if (ok) launchApp(); });
 async function renderAccounts() {
   const wrap = document.getElementById('accounts-list-wrap');
   wrap.innerHTML = '<div class="loading"><div class="spin"></div> Carregando conexões...</div>';
-  let conns = [];
-  try { conns = await sbReq('/rest/v1/pluggy_connections?select=*&order=created_at') || []; }
-  catch(e) { wrap.innerHTML = `<div class="card"><div class="empty"><div class="empty-ico">⚠️</div>${e.message}</div></div>`; return; }
+  const conns = await sbReq('/rest/v1/pluggy_connections?select=*&order=created_at') || [];
   
   if (!conns.length) {
     wrap.innerHTML = `<div class="card">
@@ -1683,36 +1557,26 @@ async function renderAccounts() {
 }
 
 async function saveConnection() {
-  const name   = v('conn-name').trim();
+  const name = v('conn-name').trim();
   const itemId = v('conn-item-id').trim();
   if (!name || !itemId) return toast('Preencha nome e Item ID', 'r');
-  if (!/^[0-9a-f-]{36}$/i.test(itemId)) return toast('Item ID inválido — deve ser um UUID', 'r');
-  try {
-    await sbReq('/rest/v1/pluggy_connections', {
-      method: 'POST',
-      headers: { 'Prefer': 'return=representation' },
-      body: JSON.stringify({ bank_name: name, item_id: itemId, user_id: S.user.id })
-    });
-    closeModal('modal-connect');
-    document.getElementById('conn-name').value = '';
-    document.getElementById('conn-item-id').value = '';
-    await renderAccounts();
-    toast('Banco conectado! Clique em Sincronizar para importar.');
-  } catch(e) {
-    if (e.message?.includes('duplicate') || e.message?.includes('unique')) {
-      toast('Este Item ID já está conectado.', 'y');
-    } else {
-      handleErr(e, 'Erro ao conectar banco');
-    }
-  }
+  const res = await sbReq('/rest/v1/pluggy_connections', {
+    method: 'POST',
+    body: JSON.stringify({ bank_name: name, item_id: itemId, user_id: S.user.id })
+  });
+  if (!res) return toast('Erro ao salvar conexão', 'r');
+  closeModal('modal-connect');
+  document.getElementById('conn-name').value = '';
+  document.getElementById('conn-item-id').value = '';
+  await renderAccounts();
+  toast('Banco conectado! Sincronize para importar os dados.');
 }
 
 async function deleteConnection(id) {
-  if (!confirm('Remover esta conexão bancária?')) return;
-  try {
-    await sbReq(`/rest/v1/pluggy_connections?id=eq.${id}`, { method: 'DELETE' });
-    await renderAccounts(); toast('Conexão removida.');
-  } catch(e) { handleErr(e, 'Erro ao remover'); }
+  if (!confirm('Remover esta conexão?')) return;
+  await sbReq(`/rest/v1/pluggy_connections?id=eq.${id}`, { method: 'DELETE' });
+  await renderAccounts();
+  toast('Conexão removida.');
 }
 
 </script>
