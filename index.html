@@ -341,6 +341,7 @@ select option{background:var(--surface)}
       <li><button class="nav-btn" data-page="investments"><span class="nav-icon">📈</span>Investimentos</button></li>
       <li><button class="nav-btn" data-page="debts"><span class="nav-icon">⚠️</span>Dívidas</button></li>
       <li><button class="nav-btn" data-page="goals"><span class="nav-icon">🏆</span>Metas</button></li>
+      <li><button class="nav-btn" data-page="accounts"><span class="nav-icon">🏦</span>Contas</button></li>
     </ul>
     <div class="sb-bottom">
       <div class="sb-user">
@@ -452,6 +453,26 @@ select option{background:var(--surface)}
       <div class="g2" id="goals-grid"></div>
     </div>
 
+    <!-- ── ACCOUNTS ── -->
+    <div class="page" id="page-accounts">
+      <div class="ph">
+        <div class="ph-left">
+          <div class="ph-title">Contas</div>
+          <div class="ph-sub">Conexões via Open Banking (Pluggy)</div>
+        </div>
+        <div class="ph-actions">
+          <button class="btn btn-primary btn-sm" onclick="openModal('modal-connect')">+ Conectar banco</button>
+        </div>
+      </div>
+      <div id="accounts-list-wrap"></div>
+      <div class="card mt20">
+        <div class="ch-label" style="margin-bottom:14px">Sobre o Open Banking</div>
+        <div style="font-size:13.5px;color:var(--text-2);line-height:1.6">
+          A Dora usa o <b style="color:var(--text)">Pluggy</b> para acessar seus dados bancários de forma segura via Open Banking regulado pelo Banco Central. Suas credenciais bancárias nunca passam pelos servidores da Dora — a conexão é direta entre você e o banco.
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- BOTTOM NAV mobile -->
@@ -462,6 +483,7 @@ select option{background:var(--surface)}
       <button class="bnav-btn" data-page="cards"><span class="nav-icon">💳</span>Cartões</button>
       <button class="bnav-btn" data-page="investments"><span class="nav-icon">📈</span>Invest.</button>
       <button class="bnav-btn" data-page="goals"><span class="nav-icon">🏆</span>Metas</button>
+      <button class="bnav-btn" data-page="accounts"><span class="nav-icon">🏦</span>Contas</button>
     </div>
   </nav>
 </div>
@@ -571,13 +593,12 @@ select option{background:var(--surface)}
 // CONFIG
 // ══════════════════════════════════════════════════════
 const C = {
-  PLUGGY_CLIENT_ID:     '21af399d-d885-47b7-b3e1-43ccb4ec7c80',
-  PLUGGY_CLIENT_SECRET: 'lxg90fwgrBHd0epyenhF3OBsPF848NXGn_eHABNXDfQ',
-  PLUGGY_ITAU:          '7f0c08a9-53e9-4851-af1d-43714bd33f8d',
-  PLUGGY_SANTANDER:     '6d1ad860-2d89-4a29-a141-9f87c58cf34a',
-  SB_URL:               'https://zlsnodubtgebjwvbcrni.supabase.co',
-  SB_KEY:               'sb_publishable_0_ozRcsj_hstGpQ4J-jVpQ_GWDsgcS4',
-  OPENAI_KEY:           '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',
+  // ── Supabase (anon key é pública por design — ok no frontend) ──
+  SB_URL: 'https://zlsnodubtgebjwvbcrni.supabase.co',
+  SB_KEY: 'sb_publishable_0_ozRcsj_hstGpQ4J-jVpQ_GWDsgcS4',
+  // ── Edge Functions (proxies seguros) ──
+  FN_AI:     'https://zlsnodubtgebjwvbcrni.supabase.co/functions/v1/dora-ai',
+  FN_PLUGGY: 'https://zlsnodubtgebjwvbcrni.supabase.co/functions/v1/dora-pluggy',
 };
 
 // ══════════════════════════════════════════════════════
@@ -783,29 +804,33 @@ function navigate(page) {
 document.querySelectorAll('.nav-btn, .bnav-btn').forEach(b => b.addEventListener('click', () => navigate(b.dataset.page)));
 function curPage() { return document.querySelector('.page.active')?.id?.replace('page-', '') || 'overview'; }
 function renderPage(p) {
-  const map = { overview: renderOverview, budget: renderBudget, cards: renderCards, installments: renderInstallments, investments: renderInvestments, debts: renderDebts, goals: renderGoals };
+  const map = { overview: renderOverview, budget: renderBudget, cards: renderCards, installments: renderInstallments, investments: renderInvestments, debts: renderDebts, goals: renderGoals, accounts: renderAccounts };
   map[p]?.();
 }
 
 // ══════════════════════════════════════════════════════
 // PLUGGY SYNC
 // ══════════════════════════════════════════════════════
-async function getPluggyToken() {
-  if (S.pluggyToken) return S.pluggyToken;
-  try {
-    const r = await fetch('https://api.pluggy.ai/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: C.PLUGGY_CLIENT_ID, clientSecret: C.PLUGGY_CLIENT_SECRET }) });
-    S.pluggyToken = (await r.json()).apiKey; return S.pluggyToken;
-  } catch { return null; }
-}
+// Pluggy agora vai via Edge Function (credenciais ficam no servidor)
 async function pGet(path) {
-  const t = await getPluggyToken(); if (!t) return null;
-  try { return await (await fetch(`https://api.pluggy.ai${path}`, { headers: { 'X-API-KEY': t } })).json(); } catch { return null; }
+  try {
+    const r = await fetch(`${C.FN_PLUGGY}?path=${encodeURIComponent(path)}`, {
+      headers: { 'Authorization': `Bearer ${S.user.sbToken}` }
+    });
+    return await r.json();
+  } catch { return null; }
 }
 
 async function syncPluggy() {
   const btn = document.getElementById('sync-btn');
   btn.textContent = '⏳ Sincronizando...'; btn.style.pointerEvents = 'none';
-  const items = [C.PLUGGY_ITAU, C.PLUGGY_SANTANDER];
+  // Buscar conexões do usuário no Supabase
+  const conns = await sbReq('/rest/v1/pluggy_connections?select=item_id,bank_name') || [];
+  const items = conns.map(c => c.item_id);
+  if (!items.length) {
+    btn.textContent = '🔄 Sincronizar'; btn.style.pointerEvents = 'auto';
+    toast('Nenhuma conta conectada. Vá em Contas para adicionar.', 'y'); return;
+  }
   let allAccs = [], allTxns = [];
   for (const itemId of items) {
     const accData = await pGet(`/accounts?itemId=${itemId}`);
@@ -1308,18 +1333,22 @@ async function fetchFIPE() {
   const el = document.getElementById('fipe-result');
   el.textContent='Buscando...'; el.style.color='var(--text-2)';
   try {
-    const brands = await (await fetch('https://parallelum.com.br/fipe/api/v1/carros/marcas')).json();
+    // Usa BrasilAPI (CORS aberto) em vez de parallelum direto
+    const BASE = 'https://brasilapi.com.br/api/fipe';
+    const brands = await (await fetch(`${BASE}/v1/marcas/carros`)).json();
     const fb = brands.find(b=>b.nome.toLowerCase().includes(brand.toLowerCase()));
     if (!fb) { el.textContent='Marca não encontrada'; el.style.color='var(--red)'; return; }
-    const mdata = await (await fetch(`https://parallelum.com.br/fipe/api/v1/carros/marcas/${fb.codigo}/modelos`)).json();
-    const fm = mdata.modelos.find(m=>m.nome.toLowerCase().includes(model.toLowerCase()));
+    const models = await (await fetch(`${BASE}/v1/marcas/carros/${fb.valor}/modelos`)).json();
+    const fm = (models.modelos||models).find(m=>m.nome.toLowerCase().includes(model.toLowerCase()));
     if (!fm) { el.textContent='Modelo não encontrado'; el.style.color='var(--red)'; return; }
-    const years = await (await fetch(`https://parallelum.com.br/fipe/api/v1/carros/marcas/${fb.codigo}/modelos/${fm.codigo}/anos`)).json();
+    const years = await (await fetch(`${BASE}/v1/marcas/carros/${fb.valor}/modelos/${fm.valor}/anos`)).json();
     const fy = years.find(y=>y.nome.includes(year))||years[0];
-    const price = await (await fetch(`https://parallelum.com.br/fipe/api/v1/carros/marcas/${fb.codigo}/modelos/${fm.codigo}/anos/${fy.codigo}`)).json();
-    el.textContent=`✓ Valor FIPE: ${price.Valor}`; el.style.color='var(--green)';
-    document.getElementById('a-val').value = parseFloat(price.Valor.replace('R$ ','').replace('.','').replace(',','.'));
-  } catch { el.textContent='Erro ao buscar. Insira o valor manualmente.'; el.style.color='var(--red)'; }
+    const price = await (await fetch(`${BASE}/v1/marcas/carros/${fb.valor}/modelos/${fm.valor}/anos/${fy.valor}`)).json();
+    const valor = price.valor || price.Valor;
+    el.textContent=`✓ Valor FIPE: ${typeof valor==='number' ? new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(valor) : valor}`;
+    el.style.color='var(--green)';
+    document.getElementById('a-val').value = typeof valor==='number' ? valor : parseFloat(String(valor).replace('R$ ','').replace(/\./g,'').replace(',','.'));
+  } catch(e) { console.error(e); el.textContent='Erro ao buscar. Insira o valor manualmente.'; el.style.color='var(--red)'; }
 }
 
 // ══════════════════════════════════════════════════════
@@ -1368,10 +1397,13 @@ DADOS FINANCEIROS (${now.toLocaleDateString('pt-BR')}):
 Limite sua resposta a 3 parágrafos curtos ou menos.`;
 
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':`Bearer ${C.OPENAI_KEY}`},
-      body:JSON.stringify({ model:'gpt-4o-mini', max_tokens:400, temperature:0.7, messages:[{role:'system',content:sys},{role:'user',content:msg}] })
+    const res = await fetch(C.FN_AI, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${S.user.sbToken}`
+      },
+      body: JSON.stringify({ systemPrompt: sys, messages: [{ role: 'user', content: msg }] })
     });
     const data = await res.json();
     typing.textContent = data.choices?.[0]?.message?.content || 'Não consegui gerar uma resposta.';
@@ -1411,6 +1443,99 @@ function toast(msg, type='g') {
 // ══════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════
+<!-- Modal: Conectar banco -->
+<div class="modal-bg" id="modal-connect">
+  <div class="modal">
+    <div class="mh">
+      <span class="mt2">Conectar banco</span>
+      <button class="mc" onclick="closeModal('modal-connect')">×</button>
+    </div>
+    <div style="font-size:13.5px;color:var(--text-2);margin-bottom:20px;line-height:1.6">
+      Para conectar sua conta, você precisa do <b style="color:var(--text)">Item ID</b> gerado pelo Pluggy para o seu banco. Você pode obtê-lo via <a href="https://dashboard.pluggy.ai" target="_blank" style="color:var(--accent)">dashboard.pluggy.ai</a> ou via a API do Pluggy.
+    </div>
+    <div class="ig">
+      <label class="il">Nome do banco</label>
+      <input id="conn-name" placeholder="Ex: Itaú, Santander, Nubank...">
+    </div>
+    <div class="ig">
+      <label class="il">Item ID (Pluggy)</label>
+      <input id="conn-item-id" placeholder="Ex: 7f0c08a9-53e9-4851-...">
+    </div>
+    <div style="background:var(--accent-bg);border-radius:9px;padding:12px;font-size:13px;color:var(--accent);margin-bottom:16px">
+      🔒 O Item ID é criado após você autenticar seu banco no Pluggy. Ele representa a conexão autorizada com sua conta.
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveConnection()">Conectar</button>
+  </div>
+</div>
+<script>
+// (Modais já declarados acima)
+</script>
+<script>
+
+// ══════════════════════════════════════════════════════
+// CONTAS (Open Banking via Pluggy)
+// ══════════════════════════════════════════════════════
+async function renderAccounts() {
+  const wrap = document.getElementById('accounts-list-wrap');
+  wrap.innerHTML = '<div class="loading"><div class="spin"></div> Carregando conexões...</div>';
+  const conns = await sbReq('/rest/v1/pluggy_connections?select=*&order=created_at') || [];
+  
+  if (!conns.length) {
+    wrap.innerHTML = `<div class="card">
+      <div class="empty">
+        <div class="empty-ico">🏦</div>
+        <div>Nenhum banco conectado ainda.</div>
+        <div style="margin-top:8px;font-size:13px;color:var(--text-3)">Clique em "+ Conectar banco" para adicionar.</div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  wrap.innerHTML = conns.map(c => {
+    const icons = { 'itaú': '🟠', 'santander': '🔴', 'nubank': '🟣', 'bradesco': '🔵', 'inter': '🟠', 'c6': '⚫' };
+    const key = Object.keys(icons).find(k => c.bank_name.toLowerCase().includes(k));
+    const icon = icons[key] || '🏦';
+    const date = new Date(c.created_at).toLocaleDateString('pt-BR');
+    return `<div class="card card-sm" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px">${c.bank_name}</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Conectado em ${date}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:1px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.item_id}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <span class="pill pill-g" style="font-size:11px">● Ativo</span>
+          <button class="btn btn-danger btn-sm" onclick="deleteConnection('${c.id}')">Remover</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function saveConnection() {
+  const name = v('conn-name').trim();
+  const itemId = v('conn-item-id').trim();
+  if (!name || !itemId) return toast('Preencha nome e Item ID', 'r');
+  const res = await sbReq('/rest/v1/pluggy_connections', {
+    method: 'POST',
+    body: JSON.stringify({ bank_name: name, item_id: itemId, user_id: S.user.id })
+  });
+  if (!res) return toast('Erro ao salvar conexão', 'r');
+  closeModal('modal-connect');
+  document.getElementById('conn-name').value = '';
+  document.getElementById('conn-item-id').value = '';
+  await renderAccounts();
+  toast('Banco conectado! Sincronize para importar os dados.');
+}
+
+async function deleteConnection(id) {
+  if (!confirm('Remover esta conexão?')) return;
+  await sbReq(`/rest/v1/pluggy_connections?id=eq.${id}`, { method: 'DELETE' });
+  await renderAccounts();
+  toast('Conexão removida.');
+}
+
 if (tryResumeSession()) launchApp();
 </script>
 </body>
