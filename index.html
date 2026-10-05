@@ -242,58 +242,6 @@ select option{background:var(--surface)}
 .toast{background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow);opacity:0;transform:translateY(-6px);transition:all .2s;pointer-events:auto}
 .toast.show{opacity:1;transform:translateY(0)}
 
-/* ══ DATE PICKER CUSTOM ══ */
-input[type="date"] {
-  position: relative;
-  cursor: pointer;
-}
-input[type="date"]::-webkit-calendar-picker-indicator {
-  background: transparent;
-  bottom: 0; color: transparent; cursor: pointer;
-  height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
-}
-.date-field-wrap { position: relative; }
-.date-field-wrap::after {
-  content: '📅';
-  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-  pointer-events: none; font-size: 16px;
-}
-.date-display {
-  background: var(--surface2); border: 1.5px solid var(--border);
-  border-radius: 9px; color: var(--text); font-size: 14px;
-  padding: 10px 38px 10px 13px; width: 100%; cursor: pointer;
-  transition: border .13s; font-family: inherit; text-align: left;
-  display: flex; align-items: center; gap: 8px; min-height: 44px;
-}
-.date-display:hover, .date-display:focus { border-color: var(--accent); outline: none; }
-.date-display .placeholder { color: var(--text-3); }
-
-/* custom date picker popover */
-.dp-wrap { position: relative; }
-.dp-pop {
-  display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 300;
-  background: var(--surface); border: 1.5px solid var(--border); border-radius: 14px;
-  box-shadow: var(--shadow); padding: 16px; min-width: 280px;
-}
-.dp-pop.open { display: block; }
-.dp-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.dp-nav { background: none; border: none; color: var(--text-2); cursor: pointer; font-size: 18px; padding: 4px 8px; border-radius: 7px; transition: background .13s; }
-.dp-nav:hover { background: var(--surface2); color: var(--text); }
-.dp-title { font-weight: 600; font-size: 14px; }
-.dp-dow { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; margin-bottom: 6px; }
-.dp-dow span { text-align: center; font-size: 11px; color: var(--text-3); padding: 4px 0; font-weight: 600; }
-.dp-days { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
-.dp-day {
-  text-align: center; padding: 7px 4px; font-size: 13px; cursor: pointer;
-  border-radius: 7px; border: none; background: none; color: var(--text);
-  transition: background .1s, color .1s; font-family: inherit;
-}
-.dp-day:hover { background: var(--surface2); }
-.dp-day.today { font-weight: 700; color: var(--accent); }
-.dp-day.selected { background: var(--accent); color: #fff; }
-.dp-day.other-month { color: var(--text-3); }
-.dp-day:disabled { opacity: .35; cursor: default; }
-
 /* ══ SWITCH ══ */
 .switch-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .switch-row:last-child{border-bottom:none}
@@ -333,6 +281,36 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .row{display:flex;align-items:center}.row-between{display:flex;align-items:center;justify-content:space-between}.gap8{gap:8px}.gap12{gap:12px}.f1{flex:1}
 .fw7{font-weight:700}.fw6{font-weight:600}.fw5{font-weight:500}
 .fs12{font-size:12px}.fs13{font-size:13px}.fs14{font-size:14px}.fs22{font-size:22px}
+
+/* ══ DATE INPUT ══ */
+input[type="date"] {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: var(--date-icon-filter, none);
+  cursor: pointer;
+  opacity: 0.7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --date-icon-filter: invert(1); }
+}
+:root[data-theme="dark"] { --date-icon-filter: invert(1); }
 </style>
 </head>
 <body>
@@ -387,9 +365,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     </div>
     <ul class="nav" id="sidebar-nav">
       <li><button class="nav-btn active" data-page="overview"><span class="nav-icon">🏠</span>Visão Geral</button></li>
-      <li><button class="nav-btn" data-page="transactions"><span class="nav-icon">💸</span>Transações</button></li>
       <li><button class="nav-btn" data-page="budget"><span class="nav-icon">🎯</span>Orçamento</button></li>
       <li><button class="nav-btn" data-page="cards"><span class="nav-icon">💳</span>Cartões</button></li>
+      <li><button class="nav-btn" data-page="transactions"><span class="nav-icon">💸</span>Transações</button></li>
       <li><button class="nav-btn" data-page="installments"><span class="nav-icon">📦</span>Parcelamentos</button></li>
       <li><button class="nav-btn" data-page="investments"><span class="nav-icon">📈</span>Investimentos</button></li>
       <li><button class="nav-btn" data-page="debts"><span class="nav-icon">⚠️</span>Dívidas</button></li>
@@ -432,7 +410,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
           <div id="balance-chart-wrap"></div>
         </div>
         <div class="card">
-          <div class="ch"><span class="ch-label">Próximos vencimentos</span><button class="ch-action" onclick="openNewBill()">+ Adicionar</button></div>
+          <div class="ch"><span class="ch-label">Próximos vencimentos</span><button class="ch-action" onclick="openModal('modal-bill')">+ Adicionar</button></div>
           <ul class="dlist" id="bills-list"></ul>
         </div>
       </div>
@@ -446,7 +424,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     <div class="page" id="page-budget">
       <div class="ph">
         <div class="ph-left"><div class="ph-title">Orçamento</div><div class="ph-sub">Planejamento de gastos mensais</div></div>
-        <div class="ph-actions"><button class="btn btn-primary btn-sm" onclick="openNewCategory()">+ Categoria</button></div>
+        <div class="ph-actions"><button class="btn btn-primary btn-sm" onclick="openModal('modal-category')">+ Categoria</button></div>
       </div>
       <div class="card" id="budget-total-card" style="margin-bottom:16px"></div>
       <div id="budget-cats"></div>
@@ -511,51 +489,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <div class="ph">
         <div class="ph-left"><div class="ph-title">Transações</div><div class="ph-sub">Histórico completo de movimentações</div></div>
         <div class="ph-actions">
-          <button class="btn btn-ghost btn-sm" onclick="openModal('modal-tx')">+ Manual</button>
+          <select id="txn-filter-cat" onchange="renderTransactions()" style="font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+            <option value="">Todas as categorias</option>
+          </select>
+          <select id="txn-filter-type" onchange="renderTransactions()" style="font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+            <option value="">Todos os tipos</option>
+            <option value="credit">Entradas</option>
+            <option value="debit">Saídas</option>
+          </select>
         </div>
       </div>
-      <!-- Filtros -->
-      <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div class="ig" style="flex:1;min-width:140px;margin-bottom:0">
-            <label class="il">Buscar</label>
-            <input id="tx-search" placeholder="Descrição..." oninput="filterTransactions()">
-          </div>
-          <div class="ig" style="min-width:130px;margin-bottom:0">
-            <label class="il">Categoria</label>
-            <select id="tx-cat-filter" onchange="filterTransactions()">
-              <option value="">Todas</option>
-            </select>
-          </div>
-          <div class="ig" style="min-width:130px;margin-bottom:0">
-            <label class="il">Cartão / Conta</label>
-            <select id="tx-acc-filter" onchange="filterTransactions()">
-              <option value="">Todas</option>
-            </select>
-          </div>
-          <div class="ig" style="min-width:110px;margin-bottom:0">
-            <label class="il">Tipo</label>
-            <select id="tx-type-filter" onchange="filterTransactions()">
-              <option value="">Todos</option>
-              <option value="credit">Entradas</option>
-              <option value="debit">Saídas</option>
-            </select>
-          </div>
-          <div class="ig" style="min-width:120px;margin-bottom:0">
-            <label class="il">De</label>
-            <div class="dp-wrap"><button type="button" class="date-display" id="tx-date-from-btn" onclick="dpToggle('tx-date-from')"><span id="tx-date-from-label" class="placeholder">—</span> 📅</button><div class="dp-pop" id="dp-tx-date-from"></div></div>
-            <input type="hidden" id="tx-date-from">
-          </div>
-          <div class="ig" style="min-width:120px;margin-bottom:0">
-            <label class="il">Até</label>
-            <div class="dp-wrap"><button type="button" class="date-display" id="tx-date-to-btn" onclick="dpToggle('tx-date-to')"><span id="tx-date-to-label" class="placeholder">—</span> 📅</button><div class="dp-pop" id="dp-tx-date-to"></div></div>
-            <input type="hidden" id="tx-date-to">
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="clearTxFilters()" style="margin-bottom:0">Limpar</button>
-        </div>
+      <div class="card">
+        <ul class="dlist" id="txn-full-list"></ul>
       </div>
-      <div id="tx-summary-bar" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap"></div>
-      <div class="card"><ul class="dlist" id="tx-list"></ul></div>
     </div>
 
     <!-- ── ACCOUNTS ── -->
@@ -584,8 +530,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   <nav class="bnav">
     <div class="bnav-inner">
       <button class="bnav-btn active" data-page="overview"><span class="nav-icon">🏠</span>Início</button>
-      <button class="bnav-btn" data-page="transactions"><span class="nav-icon">💸</span>Transações</button>
+      <button class="bnav-btn" data-page="budget"><span class="nav-icon">🎯</span>Orçamento</button>
       <button class="bnav-btn" data-page="cards"><span class="nav-icon">💳</span>Cartões</button>
+      <button class="bnav-btn" data-page="transactions"><span class="nav-icon">💸</span>Transações</button>
       <button class="bnav-btn" data-page="investments"><span class="nav-icon">📈</span>Invest.</button>
       <button class="bnav-btn" data-page="goals"><span class="nav-icon">🏆</span>Metas</button>
       <button class="bnav-btn" data-page="accounts"><span class="nav-icon">🏦</span>Contas</button>
@@ -597,8 +544,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 <!-- Vencimento -->
 <div class="modal-bg" id="modal-bill">
   <div class="modal">
-    <div class="mh"><span class="mt2" id="bill-modal-title">Novo vencimento</span><button class="mc" onclick="closeModal('modal-bill')">×</button></div>
-    <input type="hidden" id="b-id">
+    <div class="mh"><span class="mt2">Novo vencimento</span><button class="mc" onclick="closeModal('modal-bill')">×</button></div>
     <div class="ig"><label class="il">Nome</label><input id="b-name" placeholder="Ex: Aluguel"></div>
     <div class="g2"><div class="ig"><label class="il">Valor (R$)</label><input id="b-val" type="number" placeholder="1500"></div><div class="ig"><label class="il">Dia do mês</label><input id="b-day" type="number" min="1" max="31" placeholder="10"></div></div>
     <div class="ig"><label class="il">Categoria</label><select id="b-cat"></select></div>
@@ -610,32 +556,22 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   <div class="modal">
     <div class="mh"><span class="mt2" id="cat-modal-title">Nova categoria</span><button class="mc" onclick="closeModal('modal-category')">×</button></div>
     <input type="hidden" id="c-id">
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap" id="cat-presets">
+      <span style="font-size:12px;color:var(--text-3);width:100%;margin-bottom:4px">Sugestões rápidas</span>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('🍔','Alimentação')">🍔 Alimentação</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('🚗','Transporte')">🚗 Transporte</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('🏠','Moradia')">🏠 Moradia</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('💊','Saúde')">💊 Saúde</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('🎮','Lazer')">🎮 Lazer</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('📚','Educação')">📚 Educação</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('👕','Vestuário')">👕 Vestuário</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('🐾','Pet')">🐾 Pet</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('✈️','Viagem')">✈️ Viagem</button>
+      <button class="btn btn-ghost btn-sm" onclick="fillCat('💰','Investimentos')">💰 Investimentos</button>
+    </div>
     <div class="ig"><label class="il">Nome da categoria</label><input id="c-name" placeholder="Ex: Alimentação"></div>
     <div class="g2"><div class="ig"><label class="il">Emoji</label><input id="c-icon" placeholder="🍔" maxlength="4"></div><div class="ig"><label class="il">Limite mensal (R$)</label><input id="c-lim" type="number" placeholder="1000"></div></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveCategory()">Salvar</button>
-  </div>
-</div>
-<!-- Transação manual -->
-<div class="modal-bg" id="modal-tx">
-  <div class="modal">
-    <div class="mh"><span class="mt2">Lançamento manual</span><button class="mc" onclick="closeModal('modal-tx')">×</button></div>
-    <div class="ig"><label class="il">Descrição</label><input id="tx-desc" placeholder="Ex: Mercado, Aluguel..."></div>
-    <div class="g2">
-      <div class="ig"><label class="il">Valor (R$)</label><input id="tx-val" type="number" placeholder="150.00" step="0.01"></div>
-      <div class="ig"><label class="il">Tipo</label>
-        <select id="tx-kind">
-          <option value="debit">Saída (débito)</option>
-          <option value="credit">Entrada (crédito)</option>
-        </select>
-      </div>
-    </div>
-    <div class="ig"><label class="il">Data</label>
-      <div class="dp-wrap"><button type="button" class="date-display" id="tx-date-btn" onclick="dpToggle('tx-modal-date')"><span id="tx-date-label" class="placeholder">Selecione a data</span> 📅</button><div class="dp-pop" id="dp-tx-modal-date"></div></div>
-      <input type="hidden" id="tx-date-hidden">
-    </div>
-    <div class="ig"><label class="il">Categoria</label><select id="tx-cat-sel"></select></div>
-    <div class="ig"><label class="il">Cartão / Conta (opcional)</label><select id="tx-acc-sel"><option value="">— Nenhum —</option></select></div>
-    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveManualTx()">Salvar</button>
   </div>
 </div>
 <!-- Ativo / Patrimônio -->
@@ -917,10 +853,7 @@ function launchApp() {
   document.getElementById('sb-username').textContent = S.user.name;
   document.getElementById('sb-useremail').textContent = S.user.email;
   document.getElementById('sb-avatar').textContent = S.user.name[0].toUpperCase();
-  loadData().then(async () => {
-    await ensureDefaultCategories();
-    populateCategorySelects();
-    populateAccountSelects();
+  loadData().then(() => {
     renderPage('overview');
     if (!S.transactions.length) setTimeout(syncPluggy, 800);
   });
@@ -946,8 +879,6 @@ async function loadData() {
   S.goals        = goals  || [];
   S.assets       = assets || [];
   S.debts        = debts  || [];
-  if (typeof populateCategorySelects === 'function') populateCategorySelects();
-  if (typeof populateAccountSelects === 'function') populateAccountSelects();
 }
 
 // ══════════════════════════════════════════════════════
@@ -963,7 +894,7 @@ function navigate(page) {
 document.querySelectorAll('.nav-btn, .bnav-btn').forEach(b => b.addEventListener('click', () => navigate(b.dataset.page)));
 function curPage() { return document.querySelector('.page.active')?.id?.replace('page-', '') || 'overview'; }
 function renderPage(p) {
-  const map = { overview: renderOverview, transactions: renderTransactions, budget: renderBudget, cards: renderCards, installments: renderInstallments, investments: renderInvestments, debts: renderDebts, goals: renderGoals, accounts: renderAccounts };
+  const map = { overview: renderOverview, budget: renderBudget, cards: renderCards, transactions: renderTransactions, installments: renderInstallments, investments: renderInvestments, debts: renderDebts, goals: renderGoals, accounts: renderAccounts };
   map[p]?.();
 }
 
@@ -1153,41 +1084,38 @@ function renderOverview() {
     <div style="margin-top:20px">${renderMiniDonut(thisMonth)}</div>
   `;
 
-  // Bills + card due dates combined
+  // Bills + vencimentos dos cartões
   const billsEl = document.getElementById('bills-list');
   const today = now.getDate();
-  const allDue = [];
+  const thisMonthNum = now.getMonth();
+  const thisYear = now.getFullYear();
 
-  // Manual bills
-  S.bills.forEach(b => {
-    const dl = b.day >= today ? b.day - today : (31 - today + b.day);
-    allDue.push({ name: b.name, sub: `Dia ${b.day} · ${b.category}`, value: b.value, dl, type: 'bill', ico: '📄' });
+  // Itens de vencimento dos cartões
+  const cardBills = S.accounts.filter(a => a.type === 'CREDIT' && a.due_date).map(a => {
+    const d = new Date(a.due_date);
+    const dueDay = d.getDate();
+    const dl = dueDay >= today ? dueDay - today : 31 - today + dueDay;
+    return { name: a.name, day: dueDay, value: a.current_invoice || 0, category: 'Cartão', dl, pill: dl <= 3 ? 'pill-r' : dl <= 7 ? 'pill-y' : 'pill-b', icon: '💳' };
   });
 
-  // Card due dates from accounts
-  S.accounts.filter(a => a.type === 'CREDIT' && a.due_date).forEach(c => {
-    const dd = new Date(c.due_date);
-    const diffDays = Math.round((dd - now) / (1000*60*60*24));
-    const dl = diffDays >= 0 ? diffDays : 30 + diffDays;
-    allDue.push({ name: c.name, sub: `Fatura · vence ${dd.toLocaleDateString('pt-BR')}`, value: c.current_invoice || 0, dl, type: 'card', ico: '💳' });
+  const manualBills = S.bills.map(b => {
+    const dl = b.day >= today ? b.day - today : 31 - today + b.day;
+    return { ...b, dl, pill: dl <= 3 ? 'pill-r' : dl <= 7 ? 'pill-y' : 'pill-b', icon: '📄' };
   });
 
-  allDue.sort((a,b) => a.dl - b.dl);
+  const allBills = [...manualBills, ...cardBills].sort((a,b) => a.dl - b.dl);
 
-  if (!allDue.length) {
+  if (!allBills.length) {
     billsEl.innerHTML = '<div class="empty"><div class="empty-ico">📅</div>Nenhum vencimento cadastrado</div>';
   } else {
-    billsEl.innerHTML = allDue.map(b => {
-      const p = b.dl <= 3 ? 'pill-r' : b.dl <= 7 ? 'pill-y' : 'pill-b';
-      return `<li class="drow">
-        <div class="drow-ico" style="background:var(--surface2)">${b.ico}</div>
-        <div class="drow-main"><div class="drow-name">${b.name}</div><div class="drow-meta">${b.sub}</div></div>
-        <div style="text-align:right">
-          <div class="drow-amt c-r">${fmt(b.value)}</div>
-          <span class="pill ${p}" style="margin-top:4px;display:inline-flex">${b.dl===0?'Hoje':b.dl+'d'}</span>
-        </div>
-      </li>`;
-    }).join('');
+    billsEl.innerHTML = allBills.map(b => `<li class="drow">
+      <div class="drow-ico" style="background:var(--surface2)">${b.icon}</div>
+      <div class="drow-main"><div class="drow-name">${b.name}</div><div class="drow-meta">Dia ${b.day} · ${b.category}</div></div>
+      <div style="text-align:right">
+        <div class="drow-amt c-r">${fmt(b.value)}</div>
+        <span class="pill ${b.pill}" style="margin-top:4px;display:inline-flex">${b.dl===0?'Hoje':b.dl+'d'}</span>
+      </div>
+    </li>`).join('');
   }
 
   // Recent txns
@@ -1221,6 +1149,54 @@ function renderMiniDonut(txns) {
       ${slices.map(s=>`<div style="display:flex;align-items:center;gap:7px;font-size:12px"><span style="width:8px;height:8px;border-radius:50%;background:${s.c};flex-shrink:0"></span><span style="flex:1;color:var(--text-2)">${s.n}</span><span style="font-weight:600">${s.p}%</span></div>`).join('')}
     </div>
   </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// RENDER: TRANSACTIONS
+// ══════════════════════════════════════════════════════
+function renderTransactions() {
+  const el = document.getElementById('txn-full-list');
+  if (!el) return;
+
+  // Popula filtro de categorias
+  const catSel = document.getElementById('txn-filter-cat');
+  const cats = [...new Set(S.transactions.map(t => t.category).filter(Boolean))].sort();
+  const curCat = catSel.value;
+  catSel.innerHTML = '<option value="">Todas as categorias</option>' + cats.map(c => `<option${c===curCat?' selected':''}>${c}</option>`).join('');
+
+  const filterCat  = catSel.value;
+  const filterType = document.getElementById('txn-filter-type').value;
+
+  let txns = [...S.transactions];
+  if (filterCat)  txns = txns.filter(t => t.category === filterCat);
+  if (filterType === 'credit') txns = txns.filter(t => t.amount >= 0);
+  if (filterType === 'debit')  txns = txns.filter(t => t.amount < 0);
+
+  if (!txns.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-ico">💸</div>Nenhuma transação encontrada</div>'; return;
+  }
+
+  // Agrupar por mês
+  const groups = {};
+  txns.forEach(t => {
+    const d = new Date(t.date);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    if (!groups[key]) groups[key] = { label, items: [] };
+    groups[key].items.push(t);
+  });
+
+  el.innerHTML = Object.entries(groups).sort((a,b)=>b[0].localeCompare(a[0])).map(([,g]) => `
+    <li style="padding:10px 0 4px;font-size:12px;font-weight:600;color:var(--text-3);text-transform:capitalize;letter-spacing:0.03em;list-style:none">${g.label}</li>
+    ${g.items.map(t => `<li class="drow">
+      <div class="drow-ico" style="background:var(--surface2)">${catIcon(t.category)}</div>
+      <div class="drow-main">
+        <div class="drow-name">${t.description||'Sem descrição'}</div>
+        <div class="drow-meta">${fmtDate(t.date)} · ${t.category||'Outros'}</div>
+      </div>
+      <div class="drow-amt ${t.amount>=0?'c-g':'c-r'}">${t.amount>=0?'+':''}${fmt(Math.abs(t.amount))}</div>
+    </li>`).join('')}
+  `).join('');
 }
 
 // ══════════════════════════════════════════════════════
@@ -1258,11 +1234,7 @@ function renderBudget() {
     return `<div class="card" style="margin-bottom:12px">
       <div class="row-between" style="margin-bottom:10px">
         <div class="row gap8"><span style="font-size:20px">${cat.icon||'📁'}</span><span style="font-weight:600">${cat.name}</span></div>
-        <div class="row gap8">
-          <span style="font-size:13px;color:var(--text-2)">${fmt(s)}${lim>0?' / '+fmt(lim):''}</span>
-          <button class="btn btn-ghost btn-sm" onclick="editCategory('${cat.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteCategory('${cat.id}')">✕</button>
-        </div>
+        <div class="row gap8"><span style="font-size:13px;color:var(--text-2)">${fmt(s)}${lim>0?' / '+fmt(lim):''}</span><button class="btn btn-ghost btn-sm" onclick="editCategory('${cat.id}','${cat.name}','${cat.icon||''}',${cat.limit||0})">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteCategory('${cat.id}')">✕</button></div>
       </div>
       ${lim>0 ? `<div class="pb"><div class="pbf ${col}" style="width:${p}%"></div></div><div style="font-size:12px;color:var(--text-3);margin-top:4px">${lim>s?'Restam '+fmt(lim-s):'Limite excedido em '+fmt(s-lim)}</div>` : '<div style="font-size:12px;color:var(--text-3)">Sem limite definido · apenas rastreamento</div>'}
     </div>`;
@@ -1282,31 +1254,29 @@ function renderCards() {
     const used = c.current_invoice||0, lim = c.credit_limit||0, avail = c.available_credit||(lim-used);
     const p = lim>0 ? Math.min((used/lim)*100,100) : 0;
     const col = p>90?'pbf-r':p>70?'pbf-y':'pbf-g';
-    const due = c.due_date ? new Date(c.due_date + 'T12:00:00').toLocaleDateString('pt-BR') : null;
-    const dueDay = c.due_date ? new Date(c.due_date + 'T12:00:00') : null;
-    const now2 = new Date();
-    const diffD = dueDay ? Math.round((dueDay - now2)/(1000*60*60*24)) : null;
-    const duePill = diffD !== null ? (diffD <= 3 ? 'pill-r' : diffD <= 7 ? 'pill-y' : 'pill-b') : 'pill-b';
-    // Count transactions linked to this card
-    const cardTxns = S.transactions.filter(t => t.account_id === c.id);
+    const due = c.due_date ? new Date(c.due_date).toLocaleDateString('pt-BR') : '—';
     return `<div class="card">
       <div class="ch"><span class="ch-label">${c.name}</span><span class="pill pill-a">${c.brand||'Crédito'}</span></div>
       <div style="font-size:28px;font-weight:700;letter-spacing:-1px">${fmt(used)}</div>
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:14px">Fatura atual · ${cardTxns.length} transações</div>
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:14px">Fatura atual</div>
       <div class="pb"><div class="pbf ${col}" style="width:${p}%"></div></div>
       <div class="row-between" style="font-size:12.5px;color:var(--text-2);margin-top:8px">
         <span>Disponível <b style="color:var(--text)">${fmt(avail)}</b></span>
         <span>Limite <b style="color:var(--text)">${fmt(lim)}</b></span>
       </div>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:12.5px;color:var(--text-2)">Vencimento: <b style="color:var(--yellow)">${due || '—'}</b></span>
-        ${diffD !== null ? `<span class="pill ${duePill}" style="font-size:11px">${diffD === 0 ? 'Hoje' : diffD > 0 ? 'em '+diffD+'d' : 'Vencido'}</span>` : ''}
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-2)">
+        <span>Vencimento <b style="color:var(--yellow)">${due}</b></span>
       </div>
-      ${cardTxns.length ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px">Últimas transações</div>
-        ${cardTxns.slice(0,3).map(t=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">${t.description||'Sem descrição'}</span><span style="font-weight:600;flex-shrink:0;margin-left:8px;color:${t.amount>=0?'var(--green)':'var(--red)'}">${fmt(Math.abs(t.amount))}</span></div>`).join('')}
-        ${cardTxns.length > 3 ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:6px;text-align:right">+${cardTxns.length-3} transação(ões) — <button class="ch-action" style="font-size:11.5px" onclick="navigate('transactions')">Ver todas</button></div>` : ''}
-      </div>` : ''}
+      <div style="margin-top:10px">
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:6px">Últimas transações</div>
+        <ul class="dlist" style="margin:0">
+          ${S.transactions.filter(t=>t.account_id===c.id).slice(0,4).map(t=>`
+          <li class="drow" style="padding:6px 0">
+            <div class="drow-main"><div class="drow-name" style="font-size:13px">${t.description||'Sem descrição'}</div><div class="drow-meta">${fmtDate(t.date)}</div></div>
+            <div class="drow-amt ${t.amount>=0?'c-g':'c-r'}" style="font-size:13px">${t.amount>=0?'+':''}${fmt(Math.abs(t.amount))}</div>
+          </li>`).join('')||'<li style="font-size:12px;color:var(--text-3);padding:6px 0">Sem transações recentes</li>'}
+        </ul>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1338,14 +1308,12 @@ function renderInstallments() {
 // RENDER: INVESTMENTS
 // ══════════════════════════════════════════════════════
 function renderInvestments() {
-  const finInv  = S.assets.filter(a => a.type === 'investment');
-  // Also add INVESTMENT type accounts from pluggy as investment entries (merged view)
+  // Investimentos via Pluggy ficam em S.accounts com type INVESTMENT
   const pluggyInv = S.accounts.filter(a => a.type === 'INVESTMENT' || (a.subtype && a.subtype.includes('INVEST')));
-  const pluggyInvAssets = pluggyInv.map(a => ({ id: a.id, name: a.name, value: a.balance || 0, type: 'investment', is_emergency: false, source: 'pluggy' }));
-  const allFinInv = [...finInv, ...pluggyInvAssets.filter(pa => !finInv.find(x => x.id === pa.id))];
+  const finInv  = [...S.assets.filter(a => a.type === 'investment'), ...pluggyInv.map(a => ({ id: a.id, name: a.name, value: a.balance || 0, type: 'investment', source: 'pluggy' }))];
   const phys    = S.assets.filter(a => a.type !== 'investment');
   const emerg   = S.assets.find(a => a.is_emergency);
-  const totalFin = allFinInv.reduce((s,a)=>s+(a.value||0),0);
+  const totalFin = finInv.reduce((s,a)=>s+(a.value||0),0);
   const totalPhy = phys.reduce((s,a)=>s+(a.value||0),0);
 
   document.getElementById('inv-total').textContent = fmt(totalFin + totalPhy);
@@ -1356,23 +1324,22 @@ function renderInvestments() {
   }
 
   const finEl = document.getElementById('inv-fin-list');
-  if (!allFinInv.length) {
-    finEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Sincronize para ver seus investimentos ou adicione manualmente</div>';
+  if (!finInv.length) {
+    finEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Sincronize para ver seus investimentos</div>';
   } else {
-    finEl.innerHTML = allFinInv.map(a => `
+    finEl.innerHTML = finInv.map(a => `
       <li class="drow">
         <div class="drow-ico" style="background:var(--green-bg)">📈</div>
         <div class="drow-main">
           <div class="drow-name">${a.name}</div>
-          <div class="drow-meta">${a.is_emergency?'🛡 Reserva de emergência':a.source==='pluggy'?'Via Pluggy · Open Banking':'Investimento financeiro'}</div>
+          <div class="drow-meta">${a.is_emergency?'🛡 Reserva de emergência':'Investimento financeiro'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div class="drow-amt c-g">${fmt(a.value)}</div>
-          ${!a.source ? `<label class="switch" title="Marcar como reserva de emergência">
+          <label class="switch" title="Marcar como reserva de emergência">
             <input type="checkbox" ${a.is_emergency?'checked':''} onchange="toggleEmergency('${a.id}', this.checked)">
             <span class="slider"></span>
-          </label>` : ''}
-          ${!a.source ? `<button class="btn btn-danger btn-sm" onclick="deleteAsset('${a.id}')">✕</button>` : ''}
+          </label>
         </div>
       </li>
     `).join('');
@@ -1491,319 +1458,47 @@ function renderGoals() {
 // ══════════════════════════════════════════════════════
 // ACTIONS
 // ══════════════════════════════════════════════════════
-// ── PRE-DEFINED CATEGORIES ──
-const DEFAULT_CATEGORIES = [
-  {name:'Alimentação',icon:'🍔'},{name:'Transporte',icon:'🚗'},
-  {name:'Assinaturas',icon:'📺'},{name:'Saúde',icon:'💊'},
-  {name:'Moradia',icon:'🏠'},{name:'Lazer',icon:'🎮'},
-  {name:'Educação',icon:'📚'},{name:'Vestuário',icon:'👗'},
-  {name:'Pets',icon:'🐾'},{name:'Viagem',icon:'✈️'},
-  {name:'Receita',icon:'💰'},{name:'Outros',icon:'📦'},
-];
-
-async function ensureDefaultCategories() {
-  if (S.categories.length) return; // already has custom cats
-  for (const dc of DEFAULT_CATEGORIES) {
-    await sbInsert('categories', {name: dc.name, icon: dc.icon, limit: 0});
-  }
-  const cats = await sbGet('categories','order=name');
-  S.categories = cats || [];
-}
-
-function populateCategorySelects() {
-  const cats = S.categories.map(c => c.name);
-  const extras = ['Moradia','Energia','Água','Internet','Transporte','Saúde','Outros'];
-  const all = [...new Set([...cats, ...extras])].sort();
-  // Bill modal
-  const bcat = document.getElementById('b-cat');
-  if (bcat) bcat.innerHTML = all.map(c=>`<option>${c}</option>`).join('');
-  // Tx modal
-  const tcat = document.getElementById('tx-cat-sel');
-  if (tcat) tcat.innerHTML = S.categories.map(c=>`<option value="${c.name}">${c.icon||''} ${c.name}</option>`).join('');
-  // Tx filter
-  const tfcat = document.getElementById('tx-cat-filter');
-  if (tfcat) {
-    const cur = tfcat.value;
-    tfcat.innerHTML = '<option value="">Todas</option>' + S.categories.map(c=>`<option value="${c.name}">${c.icon||''} ${c.name}</option>`).join('');
-    tfcat.value = cur;
-  }
-}
-
-function populateAccountSelects() {
-  const accs = S.accounts;
-  // Tx modal
-  const taccsel = document.getElementById('tx-acc-sel');
-  if (taccsel) taccsel.innerHTML = '<option value="">— Nenhum —</option>' + accs.map(a=>`<option value="${a.id}">${a.name} (${a.type==='CREDIT'?'Cartão':'Conta'})</option>`).join('');
-  // Tx filter
-  const taccf = document.getElementById('tx-acc-filter');
-  if (taccf) {
-    const cur = taccf.value;
-    taccf.innerHTML = '<option value="">Todas</option>' + accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
-    taccf.value = cur;
-  }
-}
-
 async function saveBill() {
-  const id=v('b-id'), name=v('b-name'), val=parseFloat(v('b-val')), day=parseInt(v('b-day')), cat=v('b-cat');
+  const name=v('b-name'), val=parseFloat(v('b-val')), day=parseInt(v('b-day')), cat=v('b-cat');
   if (!name||!val||!day) return toast('Preencha todos os campos','r');
-  if (id) await sbUpdate('bills',id,{name,value:val,day,category:cat});
-  else await sbInsert('bills',{name,value:val,day,category:cat});
+  await sbInsert('bills',{name,value:val,day,category:cat});
   closeModal('modal-bill'); await loadData(); renderOverview();
-  if (curPage()==='overview'||curPage()==='budget') renderPage(curPage());
-  toast(id ? 'Vencimento atualizado.' : 'Vencimento salvo.');
 }
-
-function openNewBill() {
-  document.getElementById('b-id').value = '';
-  document.getElementById('b-name').value = '';
-  document.getElementById('b-val').value = '';
-  document.getElementById('b-day').value = '';
-  document.getElementById('bill-modal-title').textContent = 'Novo vencimento';
-  populateCategorySelects();
-  openModal('modal-bill');
+function fillCat(icon, name) {
+  document.getElementById('c-icon').value = icon;
+  document.getElementById('c-name').value = name;
+  document.getElementById('c-name').focus();
 }
-
-function editBill(id) {
-  const b = S.bills.find(x=>x.id===id); if (!b) return;
-  document.getElementById('b-id').value = b.id;
-  document.getElementById('b-name').value = b.name;
-  document.getElementById('b-val').value = b.value;
-  document.getElementById('b-day').value = b.day;
-  document.getElementById('bill-modal-title').textContent = 'Editar vencimento';
-  populateCategorySelects();
-  const sel = document.getElementById('b-cat');
-  if (sel) { for (let o of sel.options) if (o.value===b.category) { o.selected=true; break; } }
-  openModal('modal-bill');
-}
-
-async function saveCategory() {
-  const id=v('c-id'), name=v('c-name'), icon=v('c-icon'), lim=parseFloat(v('c-lim'))||0;
-  if (!name) return toast('Informe o nome da categoria','r');
-  if (id) await sbUpdate('categories',id,{name,icon,limit:lim});
-  else await sbInsert('categories',{name,icon,limit:lim});
-  closeModal('modal-category'); await loadData(); renderBudget();
-  populateCategorySelects();
-  toast(id ? 'Categoria atualizada.' : 'Categoria criada.');
-}
-
-function openNewCategory() {
-  document.getElementById('c-id').value = '';
-  document.getElementById('c-name').value = '';
-  document.getElementById('c-icon').value = '';
-  document.getElementById('c-lim').value = '';
-  document.getElementById('cat-modal-title').textContent = 'Nova categoria';
-  openModal('modal-category');
-}
-
-function editCategory(id) {
-  const c = S.categories.find(x=>x.id===id); if (!c) return;
-  document.getElementById('c-id').value = c.id;
-  document.getElementById('c-name').value = c.name;
-  document.getElementById('c-icon').value = c.icon || '';
-  document.getElementById('c-lim').value = c.limit || '';
+function editCategory(id, name, icon, limit) {
+  document.getElementById('c-id').value = id;
+  document.getElementById('c-name').value = name;
+  document.getElementById('c-icon').value = icon;
+  document.getElementById('c-lim').value = limit || '';
   document.getElementById('cat-modal-title').textContent = 'Editar categoria';
+  document.getElementById('cat-presets').style.display = 'none';
   openModal('modal-category');
 }
-
+async function saveCategory() {
+  const id = document.getElementById('c-id').value;
+  const name = v('c-name'), icon = v('c-icon'), lim = parseFloat(v('c-lim')) || 0;
+  if (!name) return toast('Informe o nome da categoria', 'r');
+  if (id) {
+    await sbUpdate('categories', id, { name, icon, limit: lim });
+  } else {
+    await sbInsert('categories', { name, icon, limit: lim });
+  }
+  // Reset modal
+  document.getElementById('c-id').value = '';
+  document.getElementById('cat-modal-title').textContent = 'Nova categoria';
+  document.getElementById('cat-presets').style.display = 'flex';
+  closeModal('modal-category');
+  await loadData();
+  renderBudget();
+}
 async function deleteCategory(id) {
   if (!confirm('Remover categoria?')) return;
-  await sbDelete('categories',id); await loadData(); renderBudget(); populateCategorySelects();
+  await sbDelete('categories',id); await loadData(); renderBudget();
 }
-
-async function saveManualTx() {
-  const desc = v('tx-desc'), val = parseFloat(v('tx-val')), kind = v('tx-kind'),
-    date = document.getElementById('tx-date-hidden').value,
-    cat = v('tx-cat-sel'), accId = v('tx-acc-sel');
-  if (!desc||!val||!date) return toast('Preencha descrição, valor e data','r');
-  const amount = kind === 'debit' ? -Math.abs(val) : Math.abs(val);
-  await sbInsert('transactions', {
-    description: desc, amount, date, type: kind, category: cat,
-    account_id: accId || null, item_id: null
-  });
-  closeModal('modal-tx'); await loadData(); renderPage(curPage());
-  toast('Transação lançada!');
-}
-
-// ══════════════════════════════════════════════════════
-// RENDER: TRANSACTIONS
-// ══════════════════════════════════════════════════════
-let _txFiltered = [];
-
-function renderTransactions() {
-  populateCategorySelects();
-  populateAccountSelects();
-  _txFiltered = [...S.transactions];
-  applyTxFilters();
-}
-
-function filterTransactions() { applyTxFilters(); }
-
-function applyTxFilters() {
-  const search = (document.getElementById('tx-search')?.value || '').toLowerCase();
-  const cat    = document.getElementById('tx-cat-filter')?.value || '';
-  const acc    = document.getElementById('tx-acc-filter')?.value || '';
-  const type   = document.getElementById('tx-type-filter')?.value || '';
-  const from   = document.getElementById('tx-date-from')?.value || '';
-  const to     = document.getElementById('tx-date-to')?.value || '';
-
-  _txFiltered = S.transactions.filter(t => {
-    if (search && !(t.description||'').toLowerCase().includes(search)) return false;
-    if (cat && t.category !== cat) return false;
-    if (acc && t.account_id !== acc) return false;
-    if (type === 'credit' && t.amount < 0) return false;
-    if (type === 'debit' && t.amount >= 0) return false;
-    if (from && t.date < from) return false;
-    if (to && t.date > to) return false;
-    return true;
-  });
-
-  // Summary bar
-  const totalIn  = _txFiltered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-  const totalOut = Math.abs(_txFiltered.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0));
-  const sumEl = document.getElementById('tx-summary-bar');
-  if (sumEl) sumEl.innerHTML = `
-    <div class="card card-sm" style="flex:1;min-width:120px"><div class="ch-label">Entradas</div><div class="stat-n c-g" style="font-size:18px;margin-top:6px">${fmt(totalIn)}</div></div>
-    <div class="card card-sm" style="flex:1;min-width:120px"><div class="ch-label">Saídas</div><div class="stat-n c-r" style="font-size:18px;margin-top:6px">${fmt(totalOut)}</div></div>
-    <div class="card card-sm" style="flex:1;min-width:120px"><div class="ch-label">Saldo filtrado</div><div class="stat-n" style="font-size:18px;margin-top:6px;color:${totalIn-totalOut>=0?'var(--green)':'var(--red)'}">${fmt(totalIn-totalOut)}</div></div>
-    <div class="card card-sm" style="min-width:80px;text-align:center"><div class="ch-label">Total</div><div class="stat-n" style="font-size:18px;margin-top:6px">${_txFiltered.length}</div></div>
-  `;
-
-  const el = document.getElementById('tx-list');
-  if (!el) return;
-  if (!_txFiltered.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-ico">🔍</div>Nenhuma transação encontrada</div>'; return;
-  }
-  const accMap = {};
-  S.accounts.forEach(a => accMap[a.id] = a.name);
-  el.innerHTML = _txFiltered.map(t => {
-    const accName = t.account_id ? (accMap[t.account_id] || '—') : '—';
-    return `<li class="drow">
-      <div class="drow-ico" style="background:var(--surface2)">${catIcon(t.category)}</div>
-      <div class="drow-main">
-        <div class="drow-name">${t.description||'Sem descrição'}</div>
-        <div class="drow-meta">${fmtDate(t.date)} · ${t.category||'Outros'} · <span style="color:var(--text-3)">${accName}</span></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="drow-amt ${t.amount>=0?'c-g':'c-r'}">${t.amount>=0?'+':''}${fmt(Math.abs(t.amount))}</div>
-        <button class="btn btn-danger btn-sm" onclick="deleteManualTx('${t.id}')">✕</button>
-      </div>
-    </li>`;
-  }).join('');
-}
-
-function clearTxFilters() {
-  ['tx-search','tx-date-from','tx-date-to'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
-  ['tx-cat-filter','tx-acc-filter','tx-type-filter'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('tx-date-from-label').textContent = '—';
-  document.getElementById('tx-date-from-label').className = 'placeholder';
-  document.getElementById('tx-date-to-label').textContent = '—';
-  document.getElementById('tx-date-to-label').className = 'placeholder';
-  applyTxFilters();
-}
-
-async function deleteManualTx(id) {
-  if (!confirm('Remover transação?')) return;
-  await sbDelete('transactions', id); await loadData(); applyTxFilters();
-}
-
-// ══════════════════════════════════════════════════════
-// CUSTOM DATE PICKER
-// ══════════════════════════════════════════════════════
-const DP = {}; // state per picker id
-
-function dpToggle(pickerId) {
-  const popId = 'dp-' + pickerId;
-  const pop = document.getElementById(popId);
-  if (!pop) return;
-  const isOpen = pop.classList.contains('open');
-  // close all others
-  document.querySelectorAll('.dp-pop.open').forEach(p => p.classList.remove('open'));
-  if (!isOpen) { dpRender(pickerId); pop.classList.add('open'); }
-}
-
-function dpRender(pickerId) {
-  const popId = 'dp-' + pickerId;
-  const pop = document.getElementById(popId);
-  if (!pop) return;
-  const today = new Date();
-  if (!DP[pickerId]) DP[pickerId] = { month: today.getMonth(), year: today.getFullYear() };
-  const { month, year } = DP[pickerId];
-  const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const first = new Date(year, month, 1);
-  const lastDay = new Date(year, month+1, 0).getDate();
-  const startDow = first.getDay(); // 0=sun
-
-  let days = '';
-  for (let i=0; i<startDow; i++) days += `<button class="dp-day other-month" disabled></button>`;
-  for (let d=1; d<=lastDay; d++) {
-    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const isToday = d===today.getDate() && month===today.getMonth() && year===today.getFullYear();
-    // check if selected
-    const hidId = dpGetHiddenId(pickerId);
-    const selVal = hidId ? document.getElementById(hidId)?.value : '';
-    const isSel = selVal === dateStr;
-    days += `<button class="dp-day${isToday?' today':''}${isSel?' selected':''}" onclick="dpSelect('${pickerId}','${dateStr}')">${d}</button>`;
-  }
-
-  pop.innerHTML = `
-    <div class="dp-hdr">
-      <button class="dp-nav" onclick="dpShift('${pickerId}',-1)">‹</button>
-      <span class="dp-title">${MONTHS[month]} ${year}</span>
-      <button class="dp-nav" onclick="dpShift('${pickerId}',1)">›</button>
-    </div>
-    <div class="dp-dow"><span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span></div>
-    <div class="dp-days">${days}</div>
-  `;
-}
-
-function dpShift(pickerId, dir) {
-  if (!DP[pickerId]) { const t=new Date(); DP[pickerId]={month:t.getMonth(),year:t.getFullYear()}; }
-  DP[pickerId].month += dir;
-  if (DP[pickerId].month > 11) { DP[pickerId].month=0; DP[pickerId].year++; }
-  if (DP[pickerId].month < 0) { DP[pickerId].month=11; DP[pickerId].year--; }
-  dpRender(pickerId);
-}
-
-function dpSelect(pickerId, dateStr) {
-  const hidId = dpGetHiddenId(pickerId);
-  if (hidId) {
-    const hidEl = document.getElementById(hidId);
-    if (hidEl) hidEl.value = dateStr;
-  }
-  const labelId = dpGetLabelId(pickerId);
-  if (labelId) {
-    const labEl = document.getElementById(labelId);
-    if (labEl) { labEl.textContent = new Date(dateStr+'T12:00:00').toLocaleDateString('pt-BR'); labEl.className=''; }
-  }
-  const popId = 'dp-' + pickerId;
-  document.getElementById(popId)?.classList.remove('open');
-  // trigger filter if on transactions page
-  if (pickerId.startsWith('tx-date')) filterTransactions();
-}
-
-function dpGetHiddenId(pickerId) {
-  const map = {
-    'tx-date-from':   'tx-date-from',
-    'tx-date-to':     'tx-date-to',
-    'tx-modal-date':  'tx-date-hidden',
-  };
-  return map[pickerId] || null;
-}
-function dpGetLabelId(pickerId) {
-  const map = {
-    'tx-date-from':   'tx-date-from-label',
-    'tx-date-to':     'tx-date-to-label',
-    'tx-modal-date':  'tx-date-label',
-  };
-  return map[pickerId] || null;
-}
-
-// Close pickers on outside click
-document.addEventListener('click', e => {
-  if (!e.target.closest('.dp-wrap')) {
-    document.querySelectorAll('.dp-pop.open').forEach(p => p.classList.remove('open'));
-  }
-});
 function setBudgetTotal() {
   const v2 = parseFloat(document.getElementById('bt-inp')?.value);
   if (!v2) return; S.budgetTotal=v2; localStorage.setItem('dora-budget-total',v2); renderBudget();
@@ -1948,7 +1643,16 @@ function fmtDate(d) { return new Date(d).toLocaleDateString('pt-BR'); }
 function v(id) { return document.getElementById(id)?.value||''; }
 function catIcon(c) { const m={'Alimentação':'🍔','Transporte':'🚗','Assinaturas':'📺','Saúde':'💊','Moradia':'🏠','Receita':'💰','Lazer':'🎮','Outros':'💳'}; return m[c]||'💳'; }
 
-function openModal(id) { document.getElementById(id)?.classList.add('open'); }
+function openModal(id) {
+  if (id === 'modal-bill') {
+    const sel = document.getElementById('b-cat');
+    const cats = S.categories.map(cat => cat.name);
+    const defaults = ['Moradia','Energia','Água','Internet','Saúde','Transporte','Outro'];
+    const all = [...new Set([...cats, ...defaults])].sort();
+    sel.innerHTML = all.map(n => `<option>${n}</option>`).join('');
+  }
+  document.getElementById(id)?.classList.add('open');
+}
 function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 
